@@ -1117,7 +1117,26 @@ export default function ReadingMode({
           // Determine styling based on status
           let className = "px-1 py-0.5 rounded hover:underline cursor-pointer select-text"
 
-          if (status.learned) {
+          // Check if there are temporary changes for this phrase
+          const isPhraseSelected = selectedWord === phrase
+          const hasTempChanges = isPhraseSelected && (tempConfidence !== null || tempLearned !== null)
+
+          if (hasTempChanges) {
+            // Use temporary states for the selected phrase
+            const isCurrentlyLearned = tempLearned !== null ? tempLearned : status.learned || false
+            const currentConfidence = tempConfidence !== null ? tempConfidence : status.confidence || 1
+
+            if (isCurrentlyLearned) {
+              // Phrase is temporarily marked as learned
+              className += " text-primary"
+            } else {
+              // Phrase has temporary confidence level
+              className += ` ${getConfidenceColor(currentConfidence)}`
+            }
+            
+            // Add a ring to indicate it's selected
+            className += " ring-2 ring-primary"
+          } else if (status.learned) {
             className += " text-primary"
           } else if (status.confidence) {
             className += ` ${getConfidenceColor(status.confidence)}`
@@ -1125,8 +1144,8 @@ export default function ReadingMode({
             className += " bg-purple-100"
           }
 
-          // Check if this is the selected phrase
-          if (selectedWord === phrase) {
+          // Check if this is the selected phrase (but not if it already has temp changes)
+          if (selectedWord === phrase && !hasTempChanges) {
             className += " ring-2 ring-primary"
           }
 
@@ -1183,6 +1202,9 @@ export default function ReadingMode({
               // Word has temporary confidence level
               className += ` ${getConfidenceColor(currentConfidence)}`
             }
+            
+            // Add a ring to indicate it's selected, but don't override the confidence background color
+            className += " ring-2 ring-primary"
           } else if (status) {
             if (status.learned) {
               // Word is fully learned - no background
@@ -1201,8 +1223,8 @@ export default function ReadingMode({
             className += " ring-2 ring-primary"
           }
 
-          // Add selection class if this word is in the selection
-          if (selectedWordSpans.includes(cleanToken)) {
+          // Add selection class if this word is in the selection (but not if it already has temp changes)
+          if (selectedWordSpans.includes(cleanToken) && !hasTempChanges) {
             className += " bg-primary/20 ring-2 ring-primary"
           }
 
