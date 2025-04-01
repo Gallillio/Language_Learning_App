@@ -25,6 +25,18 @@ export interface Word {
   last_practiced?: string // ISO date string
   language: string
   userId?: number // Add userId to associate words with users
+  
+  // SM-2 spaced repetition fields
+  ease_factor?: number // Starts at 2.5, adjusted based on performance
+  interval?: number // Current interval in days
+  repetitions?: number // Number of successful reviews in a row
+  next_review_date?: string // Date string for next review
+  
+  // History tracking for reviews
+  history?: Array<{
+    date: string; // ISO date string
+    quality: number; // Quality rating 1-5
+  }>;
 }
 
 interface WordBankContextType {
@@ -38,7 +50,7 @@ interface WordBankContextType {
   unmarkAsLearned: (id: number) => Promise<{ success: boolean; message?: string }>
   deleteWord: (id: number) => Promise<{ success: boolean; message?: string }>
   getWordStatus: (word: string) => { inBank: boolean; confidence: number; learned: boolean; meaning?: string } | null
-  scheduleReview: (id: number, minutes: number) => void
+  scheduleReview: (id: number, quality: number) => void
   getWordsForReview: () => { today: Word[], tomorrow: Word[], later: Word[] }
 }
 
@@ -291,20 +303,148 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
     return null;
   };
 
-  // Schedule a review for a word
-  const scheduleReview = (id: number, minutes: number) => {
-    console.log(`Scheduling review for word ID ${id} in ${minutes} minutes`);
-    // In a real implementation, we would update the last_practiced date
-    // and store the next review time, but for now we'll just log it
+  // Schedule a review for a word using a simplified SM-2 algorithm
+  const scheduleReview = (id: number, quality: number) => {
+    if (!user) return;
+    
+    // Find the word in either list
+    const learningWord = learningWords.find(w => w.id === id);
+    const learnedWord = learnedWords.find(w => w.id === id);
+    const word = learningWord || learnedWord;
+    
+    if (!word) return;
+    
+    // Initialize fields if they don't exist
+    const repetitions = word.repetitions ?? 0;
+    const interval = word.interval ?? 0;
+    const history = word.history || [];
+    const now = new Date();
+    let nextReviewDate = new Date(now);
+    let newInterval = interval;
+    let newRepetitions = repetitions;
+    
+    // Check if this is a new card (no previous history)
+    const isNewCard = history.length === 0;
+    
+    if (quality === 1) { // "Again" button
+      // For new cards or cards that have never been rated "Good",
+      // always set to 1 minute regardless of history
+      if (isNewCard || newRepetitions === 0) {
+        nextReviewDate.setMinutes(now.getMinutes() + 1);
+        newInterval = 0;
+        newRepetitions = 0;
+      } else {
+        // Card has been rated "Good" before, set to 10 minutes
+        nextReviewDate.setMinutes(now.getMinutes() + 10);
+        newInterval = 0;
+        newRepetitions = 0;
+      }
+    } else { // "Good" button (quality = 4)
+      // Increase repetitions for consecutive "Good" ratings
+      newRepetitions++;
+      
+      // Progressive intervals based on consecutive correct answers
+      if (newRepetitions === 1) {
+        // First "Good" - review in 10 minutes
+        nextReviewDate.setMinutes(now.getMinutes() + 10);
+        newInterval = 0;
+      } else if (newRepetitions === 2) {
+        // Second consecutive "Good" - review in 1 day
+        nextReviewDate.setDate(now.getDate() + 1);
+        newInterval = 1;
+      } else if (newRepetitions === 3) {
+        // Third consecutive "Good" - review in 3 days
+        nextReviewDate.setDate(now.getDate() + 3);
+        newInterval = 3;
+      } else if (newRepetitions === 4) {
+        // Fourth consecutive "Good" - review in 7 days
+        nextReviewDate.setDate(now.getDate() + 7);
+        newInterval = 7;
+      } else if (newRepetitions === 5) {
+        // Fifth consecutive "Good" - review in 14 days
+        nextReviewDate.setDate(now.getDate() + 14);
+        newInterval = 14;
+      } else if (newRepetitions === 6) {
+        // Sixth consecutive "Good" - review in 30 days
+        nextReviewDate.setDate(now.getDate() + 30);
+        newInterval = 30;
+      } else {
+        // More than six consecutive "Good" - double previous interval
+        newInterval = interval * 2;
+        nextReviewDate.setDate(now.getDate() + newInterval);
+      }
+    }
+    
+    // Create history entry for this review
+    const historyEntry = {
+      date: now.toISOString(),
+      quality: quality
+    };
+    
+    // Update the word with history
+    const updates = {
+      interval: newInterval,
+      repetitions: newRepetitions,
+      next_review_date: nextReviewDate.toISOString(),
+      last_practiced: now.toISOString(),
+      confidence: quality, // Keep confidence for backward compatibility
+      // Append new history entry to existing history
+      history: [...history, historyEntry]
+    };
+    
+    // Apply updates to the word in the appropriate list
+    updateWord(id, updates);
   };
 
-  // Get words for review
+  // Get words for review based on their scheduled review dates
   const getWordsForReview = () => {
-    // Return dummy groups for now - this would normally be based on review dates
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    const dayAfterTomorrow = new Date(now);
+    dayAfterTomorrow.setDate(now.getDate() + 2);
+    
+    // Combine both lists for processing
+    const allWords = [...learningWords, ...learnedWords];
+    
+    // Filter words into appropriate review groups
+    const todayWords = allWords.filter(word => {
+      if (!word.next_review_date) return true; // New words with no next_review_date go to today
+      
+      const nextReview = new Date(word.next_review_date);
+      return nextReview <= now; // Due now or overdue
+    });
+    
+    const shortTermWords = allWords.filter(word => {
+      if (!word.next_review_date) return false;
+      
+      const nextReview = new Date(word.next_review_date);
+      // Words due within the next hour but not yet due
+      return nextReview > now && 
+             nextReview <= new Date(now.getTime() + 60 * 60 * 1000);
+    });
+    
+    const tomorrowWords = allWords.filter(word => {
+      if (!word.next_review_date) return false;
+      
+      const nextReview = new Date(word.next_review_date);
+      const hourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+      // Words due after an hour but before tomorrow
+      return nextReview > hourFromNow && nextReview < tomorrow;
+    });
+    
+    const laterWords = allWords.filter(word => {
+      if (!word.next_review_date) return false;
+      
+      const nextReview = new Date(word.next_review_date);
+      return nextReview >= tomorrow;
+    });
+    
+    // Combine today and shortTerm words for immediate review
     return {
-      today: [...learningWords].slice(0, 5),
-      tomorrow: [...learningWords].slice(5, 10), 
-      later: [...learnedWords].slice(0, 5)
+      today: [...todayWords, ...shortTermWords],
+      tomorrow: tomorrowWords,
+      later: laterWords
     };
   };
 
