@@ -4,6 +4,9 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { WordBankProvider } from "@/contexts/word-bank-context"
+import { AuthProvider } from "@/contexts/auth-context"
+import { StoryProvider } from "@/contexts/story-context"
+import { StatsProvider } from "@/contexts/stats-context"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -22,7 +25,15 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          <WordBankProvider>{children}</WordBankProvider>
+          <AuthProvider>
+            <StatsProvider>
+              <StoryProvider>
+                <WordBankProvider>
+                  {children}
+                </WordBankProvider>
+              </StoryProvider>
+            </StatsProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

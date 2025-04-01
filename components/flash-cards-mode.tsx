@@ -6,7 +6,7 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
-import { Clock, Calendar, CalendarDays, Star, Edit } from "lucide-react"
+import { Clock, Calendar, CalendarDays, Star, Edit, Trash2 } from "lucide-react"
 import { useWordBank, type Word } from "@/contexts/word-bank-context"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -45,12 +45,14 @@ export default function FlashCardsMode({
     tomorrow: [],
     later: [],
   })
-  const { scheduleReview, getWordsForReview, updateWord } = useWordBank()
+  const { scheduleReview, getWordsForReview, updateWord, deleteWord } = useWordBank()
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingWord, setEditingWord] = useState<Word | null>(null)
   const [editedMeaning, setEditedMeaning] = useState("")
   const [editedExampleSentence, setEditedExampleSentence] = useState("")
   const [editedExampleSentenceTranslation, setEditedExampleSentenceTranslation] = useState("")
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
 
   useEffect(() => {
     // Get words for review
@@ -195,6 +197,30 @@ export default function FlashCardsMode({
     }
   }
 
+  const handleDeleteClick = (word: Word, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation() // Prevent card flip if event is provided
+    setConfirmDeleteId(word.id)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (confirmDeleteId) {
+      await deleteWord(confirmDeleteId)
+      
+      // Refresh the review groups
+      const groups = getWordsForReview()
+      setReviewGroups(groups)
+      
+      // Reset current card if needed
+      if (reviewGroups.today.length <= currentCardIndex) {
+        setCurrentCardIndex(0)
+      }
+      
+      setIsDeleteDialogOpen(false)
+      setConfirmDeleteId(null)
+    }
+  }
+
   return (
     <div className="flex flex-col items-center py-8">
       <h2 className="text-3xl font-bold text-center mb-6 text-primary">Flash Cards</h2>
@@ -255,6 +281,14 @@ export default function FlashCardsMode({
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="absolute top-4 left-14 text-white hover:bg-white/20"
+                        onClick={(e) => handleDeleteClick(reviewGroups.today[currentCardIndex], e)}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="absolute top-4 left-4 text-white hover:bg-white/20"
                         onClick={(e) => handleEditClick(reviewGroups.today[currentCardIndex], e)}
                       >
@@ -289,6 +323,14 @@ export default function FlashCardsMode({
                           <Star className="h-4 w-4 fill-current" />
                         </div>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-4 left-14 text-white hover:bg-white/20"
+                        onClick={(e) => handleDeleteClick(reviewGroups.today[currentCardIndex], e)}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -360,8 +402,16 @@ export default function FlashCardsMode({
                       <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
                     )}
                     <div className="mt-2 flex justify-end">
-                      <Button variant="outline" size="sm" onClick={() => handleEditClick(word)}>
+                      <Button variant="ghost" size="sm" onClick={() => handleEditClick(word)}>
                         <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteClick(word)}
+                        className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </Card>
@@ -392,8 +442,16 @@ export default function FlashCardsMode({
                       <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
                     )}
                     <div className="mt-2 flex justify-end">
-                      <Button variant="outline" size="sm" onClick={() => handleEditClick(word)}>
+                      <Button variant="ghost" size="sm" onClick={() => handleEditClick(word)}>
                         <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteClick(word)}
+                        className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </Card>
@@ -457,6 +515,26 @@ export default function FlashCardsMode({
           <DialogFooter>
             <Button type="button" onClick={handleSaveEdit}>
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Delete Word</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this word? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDelete}>
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

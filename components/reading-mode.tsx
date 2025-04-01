@@ -5,9 +5,10 @@ import type React from "react"
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { PlusCircle, Book, ArrowLeft, X, Sparkles, Upload, Edit } from "lucide-react"
+import { PlusCircle, Book, ArrowLeft, X, Sparkles, Upload, Edit, Trash2 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { useWordBank } from "@/contexts/word-bank-context"
+import { useStories } from "@/contexts/story-context"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -20,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useToast } from "@/components/ui/use-toast"
 
 interface Story {
   id: number
@@ -173,8 +175,8 @@ function EditStoryDialog({ isOpen, onClose, story, onSave }: EditStoryDialogProp
 interface WordSidebarProps {
   word: string
   onClose: () => void
-  existingWordData?: {
-    id: number
+  existingWordData: {
+    id: number | null
     meaning: string
     confidence: number
     learned: boolean
@@ -183,9 +185,19 @@ interface WordSidebarProps {
   } | null
   onUpdate: () => void
   tempConfidence: number | null
-  setTempConfidence: (value: number | null) => void
+  setTempConfidence: (confidence: number | null) => void
   tempLearned: boolean | null
-  setTempLearned: (value: boolean | null) => void
+  setTempLearned: (learned: boolean | null) => void
+  meaningInputHighlight?: 'none' | 'blue' | 'red'
+  setMeaningInputHighlight?: (highlight: 'none' | 'blue' | 'red') => void
+  setSelectedWordData: React.Dispatch<React.SetStateAction<{
+    id: number | null
+    meaning: string
+    confidence: number
+    learned: boolean
+    exampleSentence?: string
+    exampleSentenceTranslation?: string
+  } | null>>
 }
 
 function WordSidebar({
@@ -197,8 +209,11 @@ function WordSidebar({
   setTempConfidence,
   tempLearned,
   setTempLearned,
+  meaningInputHighlight,
+  setMeaningInputHighlight,
+  setSelectedWordData,
 }: WordSidebarProps) {
-  const { addWord, updateWord, markAsLearned, unmarkAsLearned } = useWordBank()
+  const { addWord, updateWord, markAsLearned, unmarkAsLearned, deleteWord } = useWordBank()
   const [meaning, setMeaning] = useState(existingWordData?.meaning || "")
   const [exampleSentence, setExampleSentence] = useState(existingWordData?.exampleSentence || "")
   const [exampleSentenceTranslation, setExampleSentenceTranslation] = useState(
@@ -213,6 +228,9 @@ function WordSidebar({
   const [showWarning, setShowWarning] = useState(false)
   const [showMeaningWarning, setShowMeaningWarning] = useState(false)
   const [hasValidMeaning, setHasValidMeaning] = useState(false)
+
+  // Add state for delete confirmation
+  const [showDeleteWarning, setShowDeleteWarning] = useState(false)
 
   // Update hasValidMeaning when meaning changes
   useEffect(() => {
@@ -260,6 +278,11 @@ function WordSidebar({
   // Handle click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // Don't close the sidebar if the delete warning is showing
+      if (showDeleteWarning) {
+        return;
+      }
+      
       if (sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
         if (isChanged && hasValidMeaning) {
           setShowWarning(true)
@@ -273,7 +296,7 @@ function WordSidebar({
     return () => {
       document.removeEventListener("mousedown", handleClickOutside)
     }
-  }, [meaning, confidence, exampleSentence, exampleSentenceTranslation, isLearned, isChanged, handleClose, hasValidMeaning])
+  }, [meaning, confidence, exampleSentence, exampleSentenceTranslation, isLearned, isChanged, handleClose, hasValidMeaning, showDeleteWarning])
 
   // Track changes to form fields
   useEffect(() => {
@@ -298,41 +321,84 @@ function WordSidebar({
   }
 
   const saveChanges = () => {
-    if (!existingWordData && !hasValidMeaning) {
-      setShowMeaningWarning(true)
-      return
+    // Special case: If user is marking a word as mastered (learned),
+    // we don't require a meaning to be provided
+    const isMarkedAsLearned = isLearned && tempLearned !== false;
+    
+    // Check if meaning is required but not provided
+    if (!isMarkedAsLearned && !meaning.trim()) {
+      setShowMeaningWarning(true);
+      setMeaningInputHighlight?.('red');
+      return;
     }
 
     if (existingWordData) {
-      // Update existing word with all fields
-      updateWord(existingWordData.id, {
-        meaning,
-        exampleSentence,
-        exampleSentenceTranslation,
-        confidence,
-      })
-
-      // If the learned status changed, handle that separately
-      if (isLearned !== existingWordData.learned) {
-        if (isLearned) {
-          markAsLearned(existingWordData.id)
+      // Make sure ID is not null before using it
+      if (existingWordData.id !== null) {
+        // Update existing word with all fields
+        const updatedData = {
+          meaning,
+          exampleSentence,
+          exampleSentenceTranslation,
+          confidence,
+        };
+        
+        // Log the update operation to debug
+        console.log('Updating word with ID', existingWordData.id, updatedData);
+        
+        updateWord(existingWordData.id, updatedData);
+  
+        // If the learned status changed, handle that separately
+        if (isLearned !== existingWordData.learned) {
+          if (isLearned) {
+            markAsLearned(existingWordData.id)
+          } else {
+            unmarkAsLearned(existingWordData.id)
+          }
+        }
+      } else {
+        // If ID is null, treat it as a new word with the same word text
+        console.log('Adding new word', word);
+        
+        // Only add word if it has a meaning or is marked as learned
+        if (meaning.trim() || isLearned) {
+          addWord({
+            word,
+            meaning,
+            exampleSentence,
+            exampleSentenceTranslation,
+            confidence,
+            learned: isLearned,
+            language: "French",
+          });
         } else {
-          unmarkAsLearned(existingWordData.id, confidence)
+          setShowMeaningWarning(true);
+          setMeaningInputHighlight?.('red');
+          return;
         }
       }
-    } else if (hasValidMeaning) {
-      // Only add new word if meaning is provided
-      addWord({
-        word,
-        meaning,
-        exampleSentence,
-        exampleSentenceTranslation,
-        confidence,
-        learned: isLearned,
-      })
+    } else {
+      // Only add new word if meaning is provided or word is marked as learned
+      if (meaning.trim() || isLearned) {
+        console.log('Adding brand new word', word);
+        addWord({
+          word,
+          meaning,
+          exampleSentence,
+          exampleSentenceTranslation,
+          confidence,
+          learned: isLearned,
+          language: "French",
+        });
+      } else {
+        setShowMeaningWarning(true);
+        setMeaningInputHighlight?.('red');
+        return;
+      }
     }
 
     // Clear temporary states
+    setMeaningInputHighlight?.('none');
     setTempConfidence(null)
     setTempLearned(null)
     onUpdate()
@@ -376,6 +442,22 @@ function WordSidebar({
     alert(`AI would generate content for the ${field} field here.`)
   }
 
+  const handleSidebarUpdate = () => {
+    // Just call the parent component's update function
+    onUpdate();
+  }
+
+  // Add handleDelete function
+  const handleDelete = () => {
+    if (existingWordData?.id) {
+      deleteWord(existingWordData.id).then(() => {
+        onUpdate()
+        handleClose()
+      })
+    }
+    setShowDeleteWarning(false)
+  }
+
   return (
     <>
       <div className="fixed top-0 right-0 h-full w-80 bg-white shadow-lg z-50 overflow-y-auto" ref={sidebarRef}>
@@ -411,11 +493,28 @@ function WordSidebar({
                 id="meaning"
                 placeholder="What does it mean?"
                 value={meaning}
-                onChange={(e) => setMeaning(e.target.value)}
-                className={showMeaningWarning ? "border-red-500" : ""}
+                onChange={(e) => {
+                  setMeaning(e.target.value);
+                  // If meaning is added, clear any blue highlight
+                  if (e.target.value.trim() && meaningInputHighlight === 'blue') {
+                    setMeaningInputHighlight?.('none');
+                  }
+                }}
+                className={
+                  showMeaningWarning 
+                    ? "border-red-500" 
+                    : meaningInputHighlight === 'blue'
+                      ? "border-blue-500 focus:ring-blue-500"
+                      : meaningInputHighlight === 'red'
+                        ? "border-red-500"
+                        : ""
+                }
               />
               {showMeaningWarning && (
-                <p className="text-sm text-red-500 mt-1">Please add a meaning for the word</p>
+                <p className="text-sm text-red-500 mt-1">Please add a meaning for this word</p>
+              )}
+              {meaningInputHighlight === 'blue' && !showMeaningWarning && (
+                <p className="text-sm text-blue-500 mt-1">Please add a meaning for this word</p>
               )}
             </div>
 
@@ -502,6 +601,18 @@ function WordSidebar({
                 Close
               </Button>
             </div>
+
+            {existingWordData?.id && (
+              <div className="pt-4">
+                <Button 
+                  onClick={() => setShowDeleteWarning(true)} 
+                  variant="destructive" 
+                  className="w-full flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="h-4 w-4" /> Delete Word
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -518,6 +629,41 @@ function WordSidebar({
               Discard Changes
             </Button>
             <Button onClick={saveAndClose}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog 
+        open={showDeleteWarning}
+        onOpenChange={(open) => {
+          // Never auto-close the dialog
+          if (open === true) {
+            setShowDeleteWarning(true);
+          }
+          // We ignore attempts to close the dialog automatically
+          // Only the Cancel and Delete buttons should close it
+        }}
+      >
+        <DialogContent 
+          className="sm:max-w-[425px]"
+          // Prevent closing on outside pointer events
+          onPointerDownOutside={(e) => e.preventDefault()}
+          // Prevent closing on escape key and outside clicks
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Delete Word</DialogTitle>
+            <DialogDescription>Are you sure you want to delete "{word}"? This action cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button variant="outline" onClick={() => setShowDeleteWarning(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -745,8 +891,12 @@ export default function ReadingMode({
   state?: { selectedStory: number | null }
   setState?: (state: { selectedStory: number | null }) => void
 } = {}) {
+  const { stories, userLibrary, loading: storiesLoading, fetchStories, fetchUserLibrary, addToLibrary } = useStories()
+  const { learningWords, learnedWords, addWord, updateWord, updateConfidence, markAsLearned, unmarkAsLearned, getWordStatus, deleteWord } = useWordBank()
+  const { toast } = useToast()
+
   // First, declare the stories state
-  const [stories, setStories] = useState<Story[]>([])
+  const [availableStories, setAvailableStories] = useState<Story[]>([])
 
   // Then use it in the derived state
   const [selectedStoryId, setSelectedStoryId] = useState<number | null>(state.selectedStory)
@@ -759,16 +909,8 @@ export default function ReadingMode({
   const [isEditStoryDialogOpen, setIsEditStoryDialogOpen] = useState(false)
   const [tempConfidence, setTempConfidence] = useState<number | null>(null)
   const [tempLearned, setTempLearned] = useState<boolean | null>(null)
-  const {
-    getWordStatus,
-    learningWords,
-    learnedWords,
-    addWord,
-    updateWord,
-    updateConfidence,
-    markAsLearned,
-    unmarkAsLearned,
-  } = useWordBank()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [meaningInputHighlight, setMeaningInputHighlight] = useState<'none' | 'blue' | 'red'>('none')
   const contentRef = useRef<HTMLDivElement>(null)
 
   // Add a refresh trigger - MOVED UP before it's used in useEffect
@@ -841,7 +983,7 @@ export default function ReadingMode({
       ...story,
       ...calculateWordStats(story.content),
     }))
-    setStories(storiesWithStats)
+    setAvailableStories(storiesWithStats)
   }, [learningWords, learnedWords])
 
   // Calculate word stats for a story
@@ -931,19 +1073,19 @@ export default function ReadingMode({
   // First, add these new state variables after the existing state declarations:
 
   const [selectedWordSpans, setSelectedWordSpans] = useState<string[]>([])
-  const [isSelectingWords, setIsSelectingWords] = useState(false)
+  const [isEditingMultiSelect, setIsEditingMultiSelect] = useState(false)
 
   const [sidebarJustClosed, setSidebarJustClosed] = useState(false)
 
   // Handle word span mouse down - start selection
   const handleWordSpanMouseDown = (word: string) => {
-    setIsSelectingWords(true)
+    setIsEditingMultiSelect(true)
     setSelectedWordSpans([word])
   }
 
   // Handle word span mouse enter - continue selection if mouse is down
   const handleWordSpanMouseEnter = (word: string) => {
-    if (isSelectingWords && !selectedWordSpans.includes(word)) {
+    if (isEditingMultiSelect && !selectedWordSpans.includes(word)) {
       setSelectedWordSpans((prev) => [...prev, word])
     }
   }
@@ -951,7 +1093,7 @@ export default function ReadingMode({
   // Handle mouse up - end selection
   useEffect(() => {
     const handleMouseUp = () => {
-      setIsSelectingWords(false)
+      setIsEditingMultiSelect(false)
     }
 
     document.addEventListener("mouseup", handleMouseUp)
@@ -962,39 +1104,41 @@ export default function ReadingMode({
 
   useEffect(() => {
     const handleMouseUp = () => {
-      setIsSelectingWords(false)
+      setIsEditingMultiSelect(false)
 
       // Only open the sidebar if it wasn't just closed and we have multiple words selected
       if (selectedWordSpans.length > 1 && !sidebarJustClosed && !selectedWord) {
         const phrase = selectedWordSpans.join(" ")
 
         // Find if phrase exists in either bank
-        const learningWord = learningWords.find((w) => w.word.toLowerCase() === phrase.toLowerCase())
-        const learnedWord = learnedWords.find((w) => w.word.toLowerCase() === phrase.toLowerCase())
+        const learningWord = learningWords.find((w) => w.word && w.word.toLowerCase() === phrase.toLowerCase())
+        const learnedWord = learnedWords.find((w) => w.word && w.word.toLowerCase() === phrase.toLowerCase())
+        const foundWord = learningWord || learnedWord
 
-        if (learningWord) {
+        if (foundWord) {
           setSelectedWordData({
-            id: learningWord.id,
-            meaning: learningWord.meaning,
-            confidence: learningWord.confidence,
-            learned: false,
-            exampleSentence: learningWord.exampleSentence,
-            exampleSentenceTranslation: learningWord.exampleSentenceTranslation,
-          })
-        } else if (learnedWord) {
-          setSelectedWordData({
-            id: learnedWord.id,
-            meaning: learnedWord.meaning,
-            confidence: 5,
-            learned: true,
-            exampleSentence: learnedWord.exampleSentence,
-            exampleSentenceTranslation: learnedWord.exampleSentenceTranslation,
+            id: foundWord.id,
+            word: foundWord.word,
+            meaning: foundWord.meaning || "",
+            confidence: foundWord.confidence,
+            learned: foundWord.learned || false,
+            exampleSentence: foundWord.exampleSentence || "",
+            exampleSentenceTranslation: foundWord.exampleSentenceTranslation || "",
           })
         } else {
-          setSelectedWordData(null)
+          setSelectedWordData({
+            id: null,
+            word: phrase,
+            meaning: "",
+            confidence: 1,
+            learned: false,
+            exampleSentence: "",
+            exampleSentenceTranslation: "",
+          })
         }
 
         setSelectedWord(phrase)
+        setSidebarOpen(true)
       }
 
       // Reset the flag after handling the event
@@ -1008,6 +1152,92 @@ export default function ReadingMode({
       document.removeEventListener("mouseup", handleMouseUp)
     }
   }, [selectedWordSpans, learningWords, learnedWords, sidebarJustClosed, selectedWord])
+
+  // Add keyboard shortcut handler for the currently hovered word
+  useEffect(() => {
+    // Only process if a story is selected
+    if (!selectedStory) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only process if we have a hovered word and not editing multiple words or no sidebar open
+      if (!hoveredWord || isEditingMultiSelect || selectedWord) return;
+      
+      const word = hoveredWord.toLowerCase();
+      const foundLearningWord = learningWords.find(w => w.word && w.word.toLowerCase() === word);
+      const foundLearnedWord = learnedWords.find(w => w.word && w.word.toLowerCase() === word);
+      const foundWord = foundLearningWord || foundLearnedWord;
+      
+      // Process number keys 1-5 for confidence levels
+      if (e.key >= '1' && e.key <= '5') {
+        const confidenceLevel = parseInt(e.key);
+        
+        if (foundWord) {
+          // Update existing word's confidence directly
+          if (foundWord.id) {
+            // Update confidence in the wordbank
+            updateConfidence(foundWord.id, confidenceLevel);
+            // Set temporary confidence to show the change
+            setTempConfidence(confidenceLevel);
+            // Force refresh to show the change
+            forceRefresh();
+          }
+        } else {
+          // New word - open sidebar with preset confidence
+          setSelectedWordData({
+            id: null,
+            word: word,
+            meaning: "",
+            confidence: confidenceLevel,
+            learned: false,
+            exampleSentence: "",
+            exampleSentenceTranslation: "",
+          });
+          setSelectedWord(word);
+          setSidebarOpen(true);
+          setTempConfidence(confidenceLevel);
+          // Highlight meaning input to indicate input is needed
+          setMeaningInputHighlight('blue');
+        }
+      }
+      
+      // Process 'i' key for marking as learned/mastered
+      if (e.key.toLowerCase() === 'i') {
+        if (foundWord && foundWord.id) {
+          // Mark existing word as learned
+          markAsLearned(foundWord.id);
+          setTempLearned(true);
+          forceRefresh();
+        } else {
+          // New word - add directly to word bank as mastered without opening sidebar
+          addWord({
+            word: word,
+            meaning: "", // Empty meaning is allowed for mastered words
+            exampleSentence: "",
+            exampleSentenceTranslation: "",
+            confidence: 1,
+            learned: true,
+            language: "French",
+          });
+          
+          // Set temporary state to show visual feedback, but don't open sidebar
+          setTempLearned(true);
+          forceRefresh();
+          
+          // Show a toast notification to confirm the word was added
+          toast({
+            title: "Word Mastered",
+            description: `"${word}" was added to your mastered words.`,
+            duration: 2000,
+          });
+        }
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [hoveredWord, isEditingMultiSelect, selectedWord, learningWords, learnedWords, updateConfidence, markAsLearned, forceRefresh, selectedStory]);
 
   // Now modify the renderStoryContent function to use these new handlers:
   // Find this part in the renderStoryContent function:
@@ -1060,8 +1290,9 @@ export default function ReadingMode({
           if (!cleanPhrase || cleanPhrase.split(" ").length < 2) continue
 
           // Check if this phrase exists in word bank
-          const learningPhrase = learningWords.find(w => w.word.toLowerCase() === cleanPhrase)
-          const learnedPhrase = learnedWords.find(w => w.word.toLowerCase() === cleanPhrase)
+          // Add null checks to prevent "Cannot read properties of undefined" errors
+          const learningPhrase = learningWords.find(w => w.word && w.word.toLowerCase() === cleanPhrase)
+          const learnedPhrase = learnedWords.find(w => w.word && w.word.toLowerCase() === cleanPhrase)
 
           if (learningPhrase || learnedPhrase) {
             return {
@@ -1236,7 +1467,7 @@ export default function ReadingMode({
                   <TooltipTrigger asChild>
                     <span
                       className={className}
-                      onClick={() => handleWordClick(cleanToken)}
+                      onClick={(e) => handleWordClick(e, cleanToken)}
                       onMouseEnter={() => {
                         handleWordHover(cleanToken)
                         handleWordSpanMouseEnter(cleanToken)
@@ -1263,7 +1494,7 @@ export default function ReadingMode({
               <span
                 key={`word-${i}`}
                 className={className}
-                onClick={() => handleWordClick(cleanToken)}
+                onClick={(e) => handleWordClick(e, cleanToken)}
                 onMouseEnter={() => {
                   handleWordHover(cleanToken)
                   handleWordSpanMouseEnter(cleanToken)
@@ -1306,19 +1537,31 @@ export default function ReadingMode({
   // Replace this:
   // setSelectedStory(story)
   // With this:
-  const handleSelectStory = (story: Story) => {
+  const handleSelectStory = async (story: Story) => {
     setSelectedStoryId(story.id)
     setSelectedStory(story)
     setState({ selectedStory: story.id })
+    
+    // If story is not in user library, add it
+    if (!userLibrary.some(s => s.id === story.id)) {
+      const result = await addToLibrary(story.id)
+      if (!result.success) {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to add story to your library",
+          variant: "destructive"
+        })
+      }
+    }
   }
 
   // Update the useEffect to find the selected story
   useEffect(() => {
-    if (selectedStoryId && stories.length > 0) {
-      const story = stories.find((s) => s.id === selectedStoryId) || null
+    if (selectedStoryId && availableStories.length > 0) {
+      const story = availableStories.find((s) => s.id === selectedStoryId) || null
       setSelectedStory(story)
     }
-  }, [selectedStoryId, stories])
+  }, [selectedStoryId, availableStories])
 
   if (selectedStory) {
     return (
@@ -1414,6 +1657,9 @@ export default function ReadingMode({
             setTempConfidence={setTempConfidence}
             tempLearned={tempLearned}
             setTempLearned={setTempLearned}
+            meaningInputHighlight={meaningInputHighlight}
+            setMeaningInputHighlight={setMeaningInputHighlight}
+            setSelectedWordData={setSelectedWordData}
           />
         )}
 
@@ -1440,7 +1686,7 @@ export default function ReadingMode({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {stories.map((story) => (
+        {availableStories.map((story) => (
           // Update the story card onClick
           <Card
             key={story.id}
@@ -1480,57 +1726,64 @@ export default function ReadingMode({
     </div>
   )
 
-  function handleAddStory(newStory: Omit<Story, "id" | "progress" | "wordCount" | "lastRead" | "wordStats">) {
-    const newId = stories.length > 0 ? Math.max(...stories.map((s) => s.id)) + 1 : 1
-    const calculatedStats = calculateWordStats(newStory.content)
-    const newStoryWithStats: Story = {
-      id: newId,
-      ...newStory,
-      progress: calculatedStats.progress || 0,
-      wordCount: calculatedStats.wordCount || 0,
-      lastRead: "Never",
-      wordStats: calculatedStats.wordStats,
+  function handleAddStory(newStoryData: Omit<Story, "id" | "progress" | "wordCount" | "lastRead" | "wordStats">) {
+    const apiStoryData = {
+      title: newStoryData.title,
+      content: newStoryData.content,
+      language: "French", // Use a proper language selection in the UI
+      difficulty: "intermediate", // Use a proper difficulty selection in the UI
+      tags: "" // Add tags support if needed
     }
-
-    setStories([...stories, newStoryWithStats])
+    
+    // Use an appropriate API call here
+    // For now, we'll just close the dialog
+    setIsAddStoryDialogOpen(false)
   }
 
   function handleEditStory(updatedStory: Story) {
-    const updatedStories = stories.map((story) =>
+    const updatedStories = availableStories.map((story) =>
       story.id === updatedStory.id ? { ...updatedStory, ...calculateWordStats(updatedStory.content) } : story,
     )
-    setStories(updatedStories)
+    setAvailableStories(updatedStories)
     setSelectedStory(updatedStory)
   }
 
-  function handleWordClick(word: string) {
-    setSelectedWord(word)
+  function handleWordClick(e: React.MouseEvent, word: string) {
+    if (isEditingMultiSelect) return
 
-    // Find if word exists in either bank
-    const learningWord = learningWords.find((w) => w.word.toLowerCase() === word.toLowerCase())
-    const learnedWord = learnedWords.find((w) => w.word.toLowerCase() === word.toLowerCase())
-
-    if (learningWord) {
+    const clickedWord = word.toLowerCase()
+    
+    // Search for the word in both learning and learned word lists
+    const foundLearningWord = learningWords.find(w => w.word.toLowerCase() === clickedWord)
+    const foundLearnedWord = learnedWords.find(w => w.word.toLowerCase() === clickedWord)
+    const foundWord = foundLearningWord || foundLearnedWord
+    
+    if (foundWord) {
+      // If word exists in the wordbank, use its data
       setSelectedWordData({
-        id: learningWord.id,
-        meaning: learningWord.meaning,
-        confidence: learningWord.confidence,
-        learned: false,
-        exampleSentence: learningWord.exampleSentence,
-        exampleSentenceTranslation: learningWord.exampleSentenceTranslation,
-      })
-    } else if (learnedWord) {
-      setSelectedWordData({
-        id: learnedWord.id,
-        meaning: learnedWord.meaning,
-        confidence: 5,
-        learned: true,
-        exampleSentence: learnedWord.exampleSentence,
-        exampleSentenceTranslation: learnedWord.exampleSentenceTranslation,
+        id: foundWord.id,
+        word: foundWord.word,
+        meaning: foundWord.meaning,
+        confidence: foundWord.confidence,
+        learned: foundWord.learned || false,
+        exampleSentence: foundWord.exampleSentence || "",
+        exampleSentenceTranslation: foundWord.exampleSentenceTranslation || "",
       })
     } else {
-      setSelectedWordData(null)
+      // If word is not in wordbank, set a new word with default values
+      setSelectedWordData({
+        id: null,
+        word: clickedWord,
+        meaning: "",
+        confidence: 1,
+        learned: false,
+        exampleSentence: "",
+        exampleSentenceTranslation: "",
+      })
     }
+    
+    setSelectedWord(clickedWord)
+    setSidebarOpen(true)
   }
 
   function handleWordHover(word: string) {

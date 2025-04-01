@@ -1,330 +1,353 @@
 "use client"
 
-import { createContext, useContext, useState, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { useAuth } from "./auth-context"
+import { 
+  getWords, 
+  getLearningWords, 
+  getMasteredWords,
+  addWord as apiAddWord,
+  updateWord as apiUpdateWord,
+  markAsLearned as apiMarkAsLearned,
+  unmarkAsLearned as apiUnmarkAsLearned,
+  updateConfidence as apiUpdateConfidence
+} from "../services/wordService"
 
 export interface Word {
   id: number
   word: string
   meaning: string
+  context?: string
   exampleSentence?: string
-  exampleSentenceTranslation?: string // Add new field
+  exampleSentenceTranslation?: string
   confidence: number // 1-5
   learned: boolean // true if fully learned, false if still learning
-  nextReview?: Date // Date when the word should be reviewed next
+  last_practiced?: string // ISO date string
+  language: string
+  userId?: number // Add userId to associate words with users
 }
 
 interface WordBankContextType {
   learningWords: Word[]
   learnedWords: Word[]
-  addWord: (word: Omit<Word, "id" | "nextReview">) => void
-  updateWord: (id: number, updates: Partial<Omit<Word, "id">>) => void // Add update function
-  updateConfidence: (id: number, confidence: number) => void
-  markAsLearned: (id: number) => void
-  unmarkAsLearned: (id: number, confidence: number) => void // Add new function
+  loading: boolean
+  addWord: (word: Omit<Word, "id" | "last_practiced">) => Promise<{ success: boolean; message?: string }>
+  updateWord: (id: number, updates: Partial<Omit<Word, "id">>) => Promise<{ success: boolean; message?: string }>
+  updateConfidence: (id: number, confidence: number) => Promise<{ success: boolean; message?: string }>
+  markAsLearned: (id: number) => Promise<{ success: boolean; message?: string }>
+  unmarkAsLearned: (id: number) => Promise<{ success: boolean; message?: string }>
+  deleteWord: (id: number) => Promise<{ success: boolean; message?: string }>
   getWordStatus: (word: string) => { inBank: boolean; confidence: number; learned: boolean; meaning?: string } | null
-  scheduleReview: (wordId: number, minutes: number) => void
-  getWordsForReview: () => { today: Word[]; tomorrow: Word[]; later: Word[] }
+  scheduleReview: (id: number, minutes: number) => void
+  getWordsForReview: () => { today: Word[], tomorrow: Word[], later: Word[] }
 }
 
 const WordBankContext = createContext<WordBankContextType | undefined>(undefined)
 
 export function WordBankProvider({ children }: { children: ReactNode }) {
-  const [learningWords, setLearningWords] = useState<Word[]>([
-    {
-      id: 1,
-      word: "bonjour",
-      meaning: "hello",
-      exampleSentence: "Bonjour, comment allez-vous?",
-      exampleSentenceTranslation: "Hello, how are you?",
-      confidence: 5,
-      learned: false,
-      nextReview: new Date(),
-    },
-    {
-      id: 2,
-      word: "merci",
-      meaning: "thank you",
-      exampleSentence: "Merci beaucoup pour votre aide.",
-      exampleSentenceTranslation: "Thank you very much for your help.",
-      confidence: 4,
-      learned: false,
-      nextReview: new Date(),
-    },
-    {
-      id: 3,
-      word: "au revoir",
-      meaning: "goodbye",
-      exampleSentence: "Au revoir, à demain!",
-      exampleSentenceTranslation: "Goodbye, see you tomorrow!",
-      confidence: 3,
-      learned: false,
-      nextReview: new Date(),
-    },
-    {
-      id: 4,
-      word: "s'il vous plaît",
-      meaning: "please",
-      exampleSentence: "S'il vous plaît, pouvez-vous m'aider?",
-      exampleSentenceTranslation: "Please, can you help me?",
-      confidence: 2,
-      learned: false,
-      nextReview: new Date(),
-    },
-    {
-      id: 5,
-      word: "enchanté",
-      meaning: "pleased to meet you",
-      exampleSentence: "Enchanté de faire votre connaissance.",
-      exampleSentenceTranslation: "Pleased to meet you.",
-      confidence: 1,
-      learned: false,
-      nextReview: new Date(),
-    },
-    {
-      id: 6,
-      word: "soleil",
-      meaning: "sun",
-      exampleSentence: "Le soleil brille aujourd'hui.",
-      exampleSentenceTranslation: "The sun is shining today.",
-      confidence: 5,
-      learned: false,
-      nextReview: new Date(Date.now() + 86400000),
-    }, // tomorrow
-    {
-      id: 7,
-      word: "marché",
-      meaning: "market",
-      exampleSentence: "Je vais au marché pour acheter des légumes.",
-      exampleSentenceTranslation: "I'm going to the market to buy vegetables.",
-      confidence: 4,
-      learned: false,
-      nextReview: new Date(Date.now() + 86400000),
-    }, // tomorrow
-    {
-      id: 8,
-      word: "pain",
-      meaning: "bread",
-      exampleSentence: "J'achète du pain frais tous les matins.",
-      exampleSentenceTranslation: "I buy fresh bread every morning.",
-      confidence: 3,
-      learned: false,
-      nextReview: new Date(Date.now() + 172800000),
-    }, // day after tomorrow
-    {
-      id: 9,
-      word: "fromage",
-      meaning: "cheese",
-      exampleSentence: "La France est connue pour ses fromages.",
-      exampleSentenceTranslation: "France is known for its cheeses.",
-      confidence: 2,
-      learned: false,
-      nextReview: new Date(Date.now() + 172800000),
-    }, // day after tomorrow
-    {
-      id: 10,
-      word: "belle",
-      meaning: "beautiful",
-      exampleSentence: "C'est une belle journée.",
-      exampleSentenceTranslation: "It's a beautiful day.",
-      confidence: 1,
-      learned: false,
-      nextReview: new Date(Date.now() + 172800000),
-    }, // day after tomorrow
-  ])
+  const { user } = useAuth();
+  const [learningWords, setLearningWords] = useState<Word[]>([])
+  const [learnedWords, setLearnedWords] = useState<Word[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const [learnedWords, setLearnedWords] = useState<Word[]>([
-    {
-      id: 101,
-      word: "oui",
-      meaning: "yes",
-      exampleSentence: "Oui, je comprends.",
-      exampleSentenceTranslation: "Yes, I understand.",
-      confidence: 5,
-      learned: true,
-    },
-    {
-      id: 102,
-      word: "non",
-      meaning: "no",
-      exampleSentence: "Non, je ne suis pas d'accord.",
-      exampleSentenceTranslation: "No, I don't agree.",
-      confidence: 5,
-      learned: true,
-    },
-    {
-      id: 103,
-      word: "et",
-      meaning: "and",
-      exampleSentence: "J'aime le café et le thé.",
-      exampleSentenceTranslation: "I like coffee and tea.",
-      confidence: 5,
-      learned: true,
-    },
-    {
-      id: 104,
-      word: "dans",
-      meaning: "in",
-      exampleSentence: "Le livre est dans mon sac.",
-      exampleSentenceTranslation: "The book is in my bag.",
-      confidence: 5,
-      learned: true,
-    },
-    {
-      id: 105,
-      word: "le",
-      meaning: "the (masculine)",
-      exampleSentence: "Le chat dort sur le canapé.",
-      exampleSentenceTranslation: "The cat is sleeping on the sofa.",
-      confidence: 5,
-      learned: true,
-    },
-    {
-      id: 106,
-      word: "la",
-      meaning: "the (feminine)",
-      exampleSentence: "La maison est grande.",
-      exampleSentenceTranslation: "The house is big.",
-      confidence: 5,
-      learned: true,
-    },
-  ])
-
-  const addWord = (word: Omit<Word, "id" | "nextReview">) => {
-    const newWord = {
-      ...word,
-      id: Date.now(),
-      nextReview: new Date(), // Set to review immediately
-    }
-
-    if (word.learned) {
-      setLearnedWords((prev) => [...prev, newWord as Word])
-    } else {
-      setLearningWords((prev) => [...prev, newWord as Word])
-    }
-  }
-
-  // Enhanced updateWord function to update all fields
-  const updateWord = (id: number, updates: Partial<Omit<Word, "id">>) => {
-    // Check if word is in learning words
-    const learningWordIndex = learningWords.findIndex((w) => w.id === id)
-    if (learningWordIndex !== -1) {
-      const updatedWords = [...learningWords]
-      updatedWords[learningWordIndex] = { ...updatedWords[learningWordIndex], ...updates }
-      setLearningWords(updatedWords)
-      return
-    }
-
-    // Check if word is in learned words
-    const learnedWordIndex = learnedWords.findIndex((w) => w.id === id)
-    if (learnedWordIndex !== -1) {
-      const updatedWords = [...learnedWords]
-      updatedWords[learnedWordIndex] = { ...updatedWords[learnedWordIndex], ...updates }
-      setLearnedWords(updatedWords)
-    }
-  }
-
-  const updateConfidence = (id: number, confidence: number) => {
-    setLearningWords((prev) => prev.map((word) => (word.id === id ? { ...word, confidence } : word)))
-  }
-
-  const markAsLearned = (id: number) => {
-    const wordToMove = learningWords.find((w) => w.id === id)
-
-    if (wordToMove) {
-      // Remove from learning words
-      setLearningWords((prev) => prev.filter((w) => w.id !== id))
-
-      // Add to learned words
-      setLearnedWords((prev) => [...prev, { ...wordToMove, learned: true, confidence: 5 }])
-    }
-  }
-
-  // Add unmarkAsLearned function to move words from learned to learning
-  const unmarkAsLearned = (id: number, confidence: number) => {
-    const wordToMove = learnedWords.find((w) => w.id === id)
-
-    if (wordToMove) {
-      // Remove from learned words
-      setLearnedWords((prev) => prev.filter((w) => w.id !== id))
-
-      // Add to learning words with specified confidence
-      setLearningWords((prev) => [...prev, { ...wordToMove, learned: false, confidence, nextReview: new Date() }])
-    }
-  }
-
-  const scheduleReview = (wordId: number, minutes: number) => {
-    const nextReview = new Date(Date.now() + minutes * 60 * 1000)
-
-    setLearningWords((prev) => prev.map((word) => (word.id === wordId ? { ...word, nextReview } : word)))
-  }
-
-  const getWordsForReview = () => {
-    const now = new Date()
-    const tomorrow = new Date(now)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    tomorrow.setHours(0, 0, 0, 0)
-
-    const dayAfterTomorrow = new Date(tomorrow)
-    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1)
-
-    const today: Word[] = []
-    const tomorrowWords: Word[] = []
-    const later: Word[] = []
-
-    learningWords.forEach((word) => {
-      if (!word.nextReview) {
-        today.push(word)
-      } else if (word.nextReview <= now) {
-        today.push(word)
-      } else if (word.nextReview < tomorrow) {
-        today.push(word)
-      } else if (word.nextReview < dayAfterTomorrow) {
-        tomorrowWords.push(word)
-      } else {
-        later.push(word)
+  // Load words from localStorage on mount and when user changes
+  useEffect(() => {
+    if (user) {
+      // Load user-specific words from localStorage
+      try {
+        const storedLearningWords = localStorage.getItem(`learning_words_${user.id}`);
+        const storedLearnedWords = localStorage.getItem(`learned_words_${user.id}`);
+        
+        if (storedLearningWords) {
+          setLearningWords(JSON.parse(storedLearningWords));
+        }
+        
+        if (storedLearnedWords) {
+          setLearnedWords(JSON.parse(storedLearnedWords));
+        }
+      } catch (error) {
+        console.error('Error loading words from localStorage:', error);
       }
-    })
+    } else {
+      // Clear words when no user is logged in
+      setLearningWords([]);
+      setLearnedWords([]);
+    }
+    
+    setLoading(false);
+  }, [user]);
 
-    return { today, tomorrow: tomorrowWords, later }
-  }
+  // Save words to localStorage whenever they change
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem(`learning_words_${user.id}`, JSON.stringify(learningWords));
+      localStorage.setItem(`learned_words_${user.id}`, JSON.stringify(learnedWords));
+    }
+  }, [user, learningWords, learnedWords]);
 
-  const getWordStatus = (word: string) => {
-    // Check if word is in learning words
-    const learningWord = learningWords.find((w) => w.word.toLowerCase() === word.toLowerCase())
+  // Add a new word to the backend and update local state
+  const addWord = async (wordData: Omit<Word, "id" | "last_practiced">) => {
+    try {
+      if (!user) {
+        return { success: false, message: 'You must be logged in to add words' };
+      }
+      
+      // Create a new word with a unique ID and user ID
+      const newWord: Word = {
+        ...wordData,
+        id: Date.now(), // Simple ID generation for demo
+        userId: user.id, // Associate with the current user
+        last_practiced: new Date().toISOString(),
+      };
+      
+      if (newWord.learned) {
+        setLearnedWords(prev => [...prev, newWord]);
+      } else {
+        setLearningWords(prev => [...prev, newWord]);
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error adding word:', error);
+      return { success: false, message: 'An error occurred while adding the word' };
+    }
+  };
+
+  // Update a word in the backend and local state
+  const updateWord = async (id: number, updates: Partial<Omit<Word, "id">>) => {
+    try {
+      if (!user) {
+        return { success: false, message: 'You must be logged in to update words' };
+      }
+
+      // Find the original word in either list
+      const originalWord = learningWords.find(w => w.id === id) || learnedWords.find(w => w.id === id);
+      
+      if (!originalWord) {
+        return { success: false, message: 'Word not found' };
+      }
+      
+      // Merge the original word with the updates
+      const updatedWord = { ...originalWord, ...updates };
+      
+      // Handle based on learned status
+      if (updatedWord.learned) {
+        // Remove from learning if it was there
+        setLearningWords(prev => prev.filter(w => w.id !== id));
+        
+        // Update in learned list or add if not there
+        setLearnedWords(prev => {
+          const exists = prev.some(w => w.id === id);
+          if (exists) {
+            return prev.map(w => w.id === id ? updatedWord : w);
+          } else {
+            return [...prev, updatedWord];
+          }
+        });
+      } else {
+        // Remove from learned if it was there
+        setLearnedWords(prev => prev.filter(w => w.id !== id));
+        
+        // Update in learning list or add if not there
+        setLearningWords(prev => {
+          const exists = prev.some(w => w.id === id);
+          if (exists) {
+            return prev.map(w => w.id === id ? updatedWord : w);
+          } else {
+            return [...prev, updatedWord];
+          }
+        });
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating word:', error);
+      return { success: false, message: 'An error occurred while updating the word' };
+    }
+  };
+
+  // Update confidence level in the backend and local state
+  const updateConfidence = async (id: number, confidence: number) => {
+    try {
+      if (!user) {
+        return { success: false, message: 'You must be logged in to update confidence' };
+      }
+
+      // Find the word in learning or learned words
+      const learningWord = learningWords.find(w => w.id === id);
+      const learnedWord = learnedWords.find(w => w.id === id);
+      
+      if (!learningWord && !learnedWord) {
+        return { success: false, message: 'Word not found' };
+      }
+      
+      // If word exists, update it
+      const word = learningWord || learnedWord;
+      const updatedWord = { ...word!, confidence, learned: confidence >= 5 };
+      
+      // If word became fully learned (confidence 5)
+      if (updatedWord.learned) {
+        // Remove from learning words
+        setLearningWords(prev => prev.filter(w => w.id !== id));
+        
+        // Add to learned words
+        setLearnedWords(prev => {
+          const exists = prev.some(w => w.id === id);
+          return exists 
+            ? prev.map(w => w.id === id ? updatedWord : w)
+            : [...prev, updatedWord];
+        });
+      } else {
+        // Update in learning words
+        setLearningWords(prev => prev.map(w => w.id === id ? updatedWord : w));
+        
+        // Remove from learned words if it was there
+        setLearnedWords(prev => prev.filter(w => w.id !== id));
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating confidence:', error);
+      return { success: false, message: 'An error occurred while updating confidence' };
+    }
+  };
+
+  // Mark word as learned
+  const markAsLearned = async (id: number) => {
+    try {
+      if (!user) {
+        return { success: false, message: 'You must be logged in to mark words as learned' };
+      }
+
+      // Find the word in learning words
+      const word = learningWords.find(w => w.id === id);
+      
+      if (!word) {
+        return { success: false, message: 'Word not found in learning words' };
+      }
+      
+      // Update the word to be learned
+      const updatedWord = { ...word, learned: true, confidence: 5 };
+      
+      // Remove from learning words
+      setLearningWords(prev => prev.filter(w => w.id !== id));
+      
+      // Add to learned words
+      setLearnedWords(prev => [...prev, updatedWord]);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error marking word as learned:', error);
+      return { success: false, message: 'An error occurred while marking word as learned' };
+    }
+  };
+
+  // Unmark word as learned
+  const unmarkAsLearned = async (id: number) => {
+    try {
+      if (!user) {
+        return { success: false, message: 'You must be logged in to unmark words' };
+      }
+
+      // Find the word in learned words
+      const word = learnedWords.find(w => w.id === id);
+      
+      if (!word) {
+        return { success: false, message: 'Word not found in learned words' };
+      }
+      
+      // Update the word as not learned
+      const updatedWord = { ...word, learned: false, confidence: 4 }; // Default to confidence 4
+      
+      // Remove from learned words
+      setLearnedWords(prev => prev.filter(w => w.id !== id));
+      
+      // Add to learning words
+      setLearningWords(prev => [...prev, updatedWord]);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error unmarking word as learned:', error);
+      return { success: false, message: 'An error occurred while unmarking word as learned' };
+    }
+  };
+
+  // Get a specific word's status
+  const getWordStatus = (wordText: string) => {
+    if (!wordText) return null;
+    
+    // Check learning words
+    const learningWord = learningWords.find(w => w.word && w.word.toLowerCase() === wordText.toLowerCase());
     if (learningWord) {
       return {
         inBank: true,
         confidence: learningWord.confidence,
         learned: false,
-        meaning: learningWord.meaning,
-      }
+        meaning: learningWord.meaning
+      };
     }
 
-    // Check if word is in learned words
-    const learnedWord = learnedWords.find((w) => w.word.toLowerCase() === word.toLowerCase())
+    // Check learned words
+    const learnedWord = learnedWords.find(w => w.word && w.word.toLowerCase() === wordText.toLowerCase());
     if (learnedWord) {
       return {
         inBank: true,
-        confidence: 5,
+        confidence: learnedWord.confidence,
         learned: true,
-        meaning: learnedWord.meaning,
-      }
+        meaning: learnedWord.meaning
+      };
     }
 
-    // Word not found in either bank
-    return null
-  }
+    return null;
+  };
+
+  // Schedule a review for a word
+  const scheduleReview = (id: number, minutes: number) => {
+    console.log(`Scheduling review for word ID ${id} in ${minutes} minutes`);
+    // In a real implementation, we would update the last_practiced date
+    // and store the next review time, but for now we'll just log it
+  };
+
+  // Get words for review
+  const getWordsForReview = () => {
+    // Return dummy groups for now - this would normally be based on review dates
+    return {
+      today: [...learningWords].slice(0, 5),
+      tomorrow: [...learningWords].slice(5, 10), 
+      later: [...learnedWords].slice(0, 5)
+    };
+  };
+
+  // Add the deleteWord function to the provider
+  const deleteWord = async (id: number) => {
+    try {
+      if (!user) {
+        return { success: false, message: 'You must be logged in to delete words' };
+      }
+
+      // Remove from both learning and learned words
+      setLearningWords(prev => prev.filter(w => w.id !== id));
+      setLearnedWords(prev => prev.filter(w => w.id !== id));
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting word:', error);
+      return { success: false, message: 'An error occurred while deleting the word' };
+    }
+  };
 
   return (
     <WordBankContext.Provider
       value={{
         learningWords,
         learnedWords,
+        loading,
         addWord,
         updateWord,
         updateConfidence,
         markAsLearned,
         unmarkAsLearned,
+        deleteWord,
         getWordStatus,
         scheduleReview,
         getWordsForReview,
@@ -332,7 +355,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
     >
       {children}
     </WordBankContext.Provider>
-  )
+  );
 }
 
 export function useWordBank() {

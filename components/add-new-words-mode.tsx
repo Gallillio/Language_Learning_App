@@ -31,6 +31,14 @@ export default function AddNewWordsMode({
     e.preventDefault()
 
     if (newWord.trim() === "") return
+    
+    // Require meaning unless the word is marked as learned
+    // In this component, we don't have an option to mark as learned directly
+    // So we always require meaning
+    if (meaning.trim() === "") {
+      alert("Please provide a meaning for the word before adding it.");
+      return;
+    }
 
     if (editingWordId) {
       // Update existing word
@@ -53,6 +61,7 @@ export default function AddNewWordsMode({
         exampleSentenceTranslation: exampleSentenceTranslation,
         confidence: confidence,
         learned: false,
+        language: "French",
       })
 
       // Reset form

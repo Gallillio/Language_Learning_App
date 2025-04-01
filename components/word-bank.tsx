@@ -7,7 +7,7 @@ import { useWordBank, type Word } from "@/contexts/word-bank-context"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { SortAsc, SortDesc, Search, BookOpen, GraduationCap, Edit } from "lucide-react"
+import { SortAsc, SortDesc, Search, BookOpen, GraduationCap, Edit, Trash2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -23,15 +24,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 // Update the component signature to accept props
 export default function WordBank({
-  state = { searchQuery: "" },
+  state = { searchQuery: "", activeTab: "learning", sortBy: "id", sortDirection: "desc" },
   setState = () => {},
 }: {
-  state?: { searchQuery: string }
-  setState?: (state: { searchQuery: string }) => void
+  state?: { searchQuery: string; activeTab: string; sortBy: string; sortDirection: "asc" | "desc" }
+  setState?: (state: { searchQuery: string; activeTab: string; sortBy: string; sortDirection: "asc" | "desc" }) => void
 } = {}) {
-  // Replace the searchQuery state with a derived state from props
+  // Replace the local state with derived state from props
   const [searchQuery, setSearchQuery] = useState(state.searchQuery)
-  const { learningWords, learnedWords, updateWord, updateConfidence, markAsLearned, unmarkAsLearned } = useWordBank()
+  const { learningWords, learnedWords, updateWord, updateConfidence, markAsLearned, unmarkAsLearned, deleteWord } = useWordBank()
   const [editingWord, setEditingWord] = useState<Word | null>(null)
   const [editedMeaning, setEditedMeaning] = useState("")
   const [editedExampleSentence, setEditedExampleSentence] = useState("")
@@ -39,9 +40,11 @@ export default function WordBank({
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [filteredLearningWords, setFilteredLearningWords] = useState<Word[]>(learningWords)
   const [filteredLearnedWords, setFilteredLearnedWords] = useState<Word[]>(learnedWords)
-  const [activeTab, setActiveTab] = useState("learning")
-  const [sortBy, setSortBy] = useState<string>("default")
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
+  const [activeTab, setActiveTab] = useState(state.activeTab)
+  const [sortBy, setSortBy] = useState<string>(state.sortBy)
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(state.sortDirection)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
 
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -74,7 +77,11 @@ export default function WordBank({
         })
         break
       default:
-        // Default sorting (no sorting)
+        // Default to sorting by ID (Recently added)
+        sortedWords.sort((a, b) => {
+          const comparison = a.id - b.id
+          return sortDirection === "asc" ? comparison : -comparison
+        })
         break
     }
 
@@ -149,12 +156,33 @@ export default function WordBank({
   }
 
   const handleUnmarkAsLearned = (id: number) => {
-    unmarkAsLearned(id, 5) // Default to confidence level 5 when unmarking
+    unmarkAsLearned(id)
+  }
+
+  const handleDeleteClick = (word: Word, e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent card click event
+    setConfirmDeleteId(word.id)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (confirmDeleteId) {
+      await deleteWord(confirmDeleteId)
+      setIsDeleteDialogOpen(false)
+      setConfirmDeleteId(null)
+    }
   }
 
   // Update the handleTabChange function to not reset search when changing tabs
   const handleTabChange = (value: string) => {
     setActiveTab(value)
+    // Update the state to persist the tab selection
+    setState({ 
+      searchQuery, 
+      activeTab: value, 
+      sortBy, 
+      sortDirection 
+    })
     // Focus the search input after tab change
     setTimeout(() => {
       searchInputRef.current?.focus()
@@ -165,14 +193,41 @@ export default function WordBank({
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value
     setSearchQuery(newQuery)
-    setState({ searchQuery: newQuery })
+    setState({ 
+      searchQuery: newQuery, 
+      activeTab, 
+      sortBy, 
+      sortDirection 
+    })
+  }
+  
+  // Add handlers for sortBy and sortDirection changes
+  const handleSortByChange = (value: string) => {
+    setSortBy(value)
+    setState({
+      searchQuery,
+      activeTab,
+      sortBy: value,
+      sortDirection
+    })
+  }
+  
+  const handleSortDirectionToggle = () => {
+    const newDirection = sortDirection === "asc" ? "desc" : "asc"
+    setSortDirection(newDirection)
+    setState({
+      searchQuery,
+      activeTab,
+      sortBy,
+      sortDirection: newDirection
+    })
   }
 
   return (
     <div>
       <h2 className="text-3xl font-bold text-primary mb-6">My Word Bank</h2>
 
-      <Tabs defaultValue="learning" value={activeTab} onValueChange={handleTabChange}>
+      <Tabs defaultValue={activeTab} value={activeTab} onValueChange={handleTabChange}>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
           <TabsList className="mb-0">
             <TabsTrigger value="learning" className="flex items-center gap-2">
@@ -188,24 +243,22 @@ export default function WordBank({
 
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <div className="flex gap-2">
-              <Select value={sortBy} onValueChange={setSortBy}>
+              <Select value={sortBy} onValueChange={handleSortByChange}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Sort by..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="default">Default</SelectItem>
+                  <SelectItem value="id">Recently Added</SelectItem>
                   <SelectItem value="alphabetical">Alphabetical</SelectItem>
                   <SelectItem value="confidence">Confidence Level</SelectItem>
                   <SelectItem value="length">Word Length</SelectItem>
-                  <SelectItem value="id">Recently Added</SelectItem>
                 </SelectContent>
               </Select>
 
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
-                disabled={sortBy === "default"}
+                onClick={handleSortDirectionToggle}
               >
                 {sortDirection === "asc" ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
               </Button>
@@ -261,14 +314,23 @@ export default function WordBank({
                       >
                         Mark as Mastered
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={(e) => handleEditClick(word, e)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
+                      <div className="absolute top-2 right-2 flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleEditClick(word, e)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleDeleteClick(word, e)}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -302,9 +364,19 @@ export default function WordBank({
                       <Button variant="outline" size="sm" onClick={() => handleUnmarkAsLearned(word.id)}>
                         Move to Learning
                       </Button>
-                      <Button variant="outline" size="sm" onClick={(e) => handleEditClick(word, e)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={(e) => handleEditClick(word, e)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleDeleteClick(word, e)}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -353,14 +425,23 @@ export default function WordBank({
                             {level}
                           </Button>
                         ))}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="ml-auto"
-                          onClick={(e) => handleEditClick(word, e)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
+                        <div className="mt-2 flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => handleEditClick(word, e)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => handleDeleteClick(word, e)}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -379,9 +460,17 @@ export default function WordBank({
                       {word.exampleSentenceTranslation && (
                         <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
                       )}
-                      <div className="flex justify-end mt-2">
-                        <Button variant="outline" size="sm" onClick={(e) => handleEditClick(word, e)}>
+                      <div className="flex justify-end gap-1 mt-2">
+                        <Button variant="ghost" size="sm" onClick={(e) => handleEditClick(word, e)}>
                           <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleDeleteClick(word, e)}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </CardContent>
@@ -446,6 +535,26 @@ export default function WordBank({
           <DialogFooter>
             <Button type="button" onClick={handleSaveEdit}>
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Delete Word</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this word? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDelete}>
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>
