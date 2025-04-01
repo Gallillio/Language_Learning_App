@@ -183,26 +183,16 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
       
       // If word exists, update it
       const word = learningWord || learnedWord;
-      const updatedWord = { ...word!, confidence, learned: confidence >= 5 };
+      // Don't automatically mark as learned based on confidence level
+      const updatedWord = { ...word!, confidence };
       
-      // If word became fully learned (confidence 5)
-      if (updatedWord.learned) {
-        // Remove from learning words
-        setLearningWords(prev => prev.filter(w => w.id !== id));
-        
-        // Add to learned words
-        setLearnedWords(prev => {
-          const exists = prev.some(w => w.id === id);
-          return exists 
-            ? prev.map(w => w.id === id ? updatedWord : w)
-            : [...prev, updatedWord];
-        });
+      // Update the word in the appropriate list without changing its learned status
+      if (word!.learned) {
+        // Update in learned words
+        setLearnedWords(prev => prev.map(w => w.id === id ? updatedWord : w));
       } else {
         // Update in learning words
         setLearningWords(prev => prev.map(w => w.id === id ? updatedWord : w));
-        
-        // Remove from learned words if it was there
-        setLearnedWords(prev => prev.filter(w => w.id !== id));
       }
       
       return { success: true };
@@ -231,7 +221,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
       
       // Remove from learning words
       setLearningWords(prev => prev.filter(w => w.id !== id));
-      
+
       // Add to learned words
       setLearnedWords(prev => [...prev, updatedWord]);
       

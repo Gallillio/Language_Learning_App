@@ -126,6 +126,116 @@ export default function WordBank({
     }
   }
 
+  // WordCard component to be reused across all tabs
+  const WordCard = ({ 
+    word, 
+    tabName,
+    keyPrefix = "" 
+  }: { 
+    word: Word, 
+    tabName: "learning" | "mastered" | "all",
+    keyPrefix?: string 
+  }) => {
+    const isLearned = word.learned;
+    const cardKey = keyPrefix ? `${keyPrefix}-${word.id}` : `${word.id}`;
+    
+    // Determine card styling based on word status
+    const cardClass = isLearned 
+      ? "bg-green-50 border-green-200 relative" 
+      : `border-2 ${getConfidenceColor(word.confidence)} relative`;
+      
+    return (
+      <Card key={cardKey} className={cardClass}>
+        <div className="flex flex-col h-full">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex justify-between">
+              <span>{word.word}</span>
+              {/* All badges and indicators removed as requested */}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col flex-grow">
+            <div className="flex-grow">
+              <p className="mb-2">{word.meaning}</p>
+              {word.exampleSentence && <p className="text-sm italic mb-2">"{word.exampleSentence}"</p>}
+              {word.exampleSentenceTranslation && (
+                <p className="text-sm mb-2">"{word.exampleSentenceTranslation}"</p>
+              )}
+            </div>
+            
+            {/* Buttons positioned at the bottom */}
+            <div className="flex flex-wrap gap-2 mt-auto pt-4">
+              {/* If the word is being learned, show confidence buttons that update confidence */}
+              {!isLearned ? (
+                <>
+                  {[1, 2, 3, 4, 5].map((level) => (
+                    <Button
+                      key={level}
+                      variant={word.confidence === level ? "default" : "outline"}
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleUpdateConfidence(word, level);
+                      }}
+                      className="flex-1 min-w-0 px-2"
+                    >
+                      {level}
+                    </Button>
+                  ))}
+                  {tabName !== "all" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-auto"
+                      onClick={() => handleMarkAsLearned(word.id)}
+                    >
+                      Mark as Mastered
+                    </Button>
+                  )}
+                </>
+              ) : (
+                // If the word is mastered, use the same button design as learning words
+                [1, 2, 3, 4, 5].map((level) => (
+                  <Button
+                    key={level}
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      unmarkAsLearned(word.id);
+                      updateConfidence(word.id, level);
+                    }}
+                    className="flex-1 min-w-0 px-2"
+                  >
+                    {level}
+                  </Button>
+                ))
+              )}
+            </div>
+          
+            {/* Edit and Delete buttons - positioned the same for all cards */}
+            <div className="absolute top-2 right-2 flex gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(e) => handleEditClick(word, e)}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(e) => handleDeleteClick(word, e)}
+                className="text-red-500 hover:text-red-700 hover:bg-red-100"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </div>
+      </Card>
+    );
+  };
+
   const handleUpdateConfidence = (word: Word, newConfidence: number) => {
     updateConfidence(word.id, newConfidence)
   }
@@ -278,62 +388,14 @@ export default function WordBank({
         </div>
 
         <TabsContent value="learning">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {filteredLearningWords.length === 0 ? (
-              <div className="col-span-2 text-center p-8 bg-gray-50 rounded-lg">
+              <div className="col-span-3 text-center p-8 bg-gray-50 rounded-lg">
                 <p className="text-muted-foreground">No words found</p>
               </div>
             ) : (
               filteredLearningWords.map((word) => (
-                <Card key={word.id} className={`border-2 ${getConfidenceColor(word.confidence)} relative`}>
-                  <CardHeader className="pb-2">
-                    <CardTitle>{word.word}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="mb-2">{word.meaning}</p>
-                    {word.exampleSentence && <p className="text-sm italic mb-4">"{word.exampleSentence}"</p>}
-                    {word.exampleSentenceTranslation && (
-                      <p className="text-sm mb-4">"{word.exampleSentenceTranslation}"</p>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      {[1, 2, 3, 4, 5].map((level) => (
-                        <Button
-                          key={level}
-                          variant={word.confidence === level ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => handleUpdateConfidence(word, level)}
-                        >
-                          {level}
-                        </Button>
-                      ))}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="ml-auto"
-                        onClick={() => handleMarkAsLearned(word.id)}
-                      >
-                        Mark as Mastered
-                      </Button>
-                      <div className="absolute top-2 right-2 flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => handleEditClick(word, e)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => handleDeleteClick(word, e)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                WordCard({ word, tabName: "learning" })
               ))
             )}
           </div>
@@ -347,39 +409,7 @@ export default function WordBank({
               </div>
             ) : (
               filteredLearnedWords.map((word) => (
-                <Card key={word.id} className="bg-green-50 border-green-200 relative">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex justify-between items-center">
-                      <span>{word.word}</span>
-                      <GraduationCap className="h-5 w-5 text-green-600" />
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p>{word.meaning}</p>
-                    {word.exampleSentence && <p className="text-sm italic mt-2">"{word.exampleSentence}"</p>}
-                    {word.exampleSentenceTranslation && (
-                      <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
-                    )}
-                    <div className="mt-2 flex justify-between">
-                      <Button variant="outline" size="sm" onClick={() => handleUnmarkAsLearned(word.id)}>
-                        Move to Learning
-                      </Button>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={(e) => handleEditClick(word, e)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => handleDeleteClick(word, e)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                WordCard({ word, tabName: "mastered" })
               ))
             )}
           </div>
@@ -394,87 +424,10 @@ export default function WordBank({
             ) : (
               <>
                 {filteredLearningWords.map((word) => (
-                  <Card
-                    key={`learning-${word.id}`}
-                    className={`border-2 ${getConfidenceColor(word.confidence)} relative`}
-                  >
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex justify-between">
-                        <span>{word.word}</span>
-                        <span className="text-xs bg-indigo-500 text-white px-2 py-1 rounded-full">Learning</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="mb-2">{word.meaning}</p>
-                      {word.exampleSentence && <p className="text-sm italic mb-2">"{word.exampleSentence}"</p>}
-                      {word.exampleSentenceTranslation && (
-                        <p className="text-sm mb-2">"{word.exampleSentenceTranslation}"</p>
-                      )}
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {[1, 2, 3, 4, 5].map((level) => (
-                          <Button
-                            key={level}
-                            variant={word.confidence === level ? "default" : "outline"}
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleUpdateConfidence(word, level)
-                            }}
-                            className="flex-1 min-w-0 px-2"
-                          >
-                            {level}
-                          </Button>
-                        ))}
-                        <div className="mt-2 flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => handleEditClick(word, e)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => handleDeleteClick(word, e)}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  WordCard({ word, tabName: "all", keyPrefix: "learning" })
                 ))}
                 {filteredLearnedWords.map((word) => (
-                  <Card key={`mastered-${word.id}`} className="bg-green-50 border-green-200 relative">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex justify-between">
-                        <span>{word.word}</span>
-                        <span className="text-xs bg-green-500 text-white px-2 py-1 rounded-full">Mastered</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p>{word.meaning}</p>
-                      {word.exampleSentence && <p className="text-sm italic mt-2">"{word.exampleSentence}"</p>}
-                      {word.exampleSentenceTranslation && (
-                        <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
-                      )}
-                      <div className="flex justify-end gap-1 mt-2">
-                        <Button variant="ghost" size="sm" onClick={(e) => handleEditClick(word, e)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => handleDeleteClick(word, e)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  WordCard({ word, tabName: "all", keyPrefix: "mastered" })
                 ))}
               </>
             )}

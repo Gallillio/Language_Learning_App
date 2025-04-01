@@ -2,13 +2,16 @@
 
 import { createContext, useState, useEffect, useContext, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { testUsers, TestUser } from '../lib/test-users';
+import api from '@/lib/api';
 
 // Define user type
 export interface User {
   id: number;
   username: string;
   email: string;
+  streak_count?: number;
+  daily_goal?: number;
+  last_activity_date?: string;
 }
 
 // Auth context type
@@ -30,98 +33,145 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   
-  // Initialize auth state from localStorage
+  // Initialize auth state from localStorage token
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (error) {
-        console.error('Failed to parse stored user:', error);
-        localStorage.removeItem('user');
+    const checkAuth = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        try {
+          // Verify the token and get user data
+          const response = await api.get('/auth/user/');
+          setUser(response.data);
+        } catch (error) {
+          console.error('Authentication error:', error);
+          localStorage.removeItem('auth_token');
+          setUser(null);
+        }
       }
-    }
-    setIsLoading(false);
+      setIsLoading(false);
+    };
+    
+    checkAuth();
   }, []);
 
   // Login function
   const login = async (username: string, password: string): Promise<{ success: boolean; message?: string }> => {
-    // Find user in test users
-    const foundUser = testUsers.find(
-      user => (user.username === username || user.email === username) && user.password === password
-    );
-    
-    if (foundUser) {
-      // Create user object without the password
-      const userData: User = {
-        id: foundUser.id,
-        username: foundUser.username,
-        email: foundUser.email
-      };
+    try {
+      setIsLoading(true);
+      const response = await api.post('/auth/login/', { username, password });
       
-      // Save to state and localStorage
-      setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData));
+      // Save the auth token
+      localStorage.setItem('auth_token', response.data.token);
       
-      // Redirect to homepage after login
-      router.push('/');
+      // Set the user state
+      setUser(response.data.user);
+      
+      // Use hard navigation instead of router.push
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 100);
       
       return { success: true };
+    } catch (error: any) {
+      // Handle different error response formats
+      let message = 'Invalid username or password';
+      
+      if (error.response) {
+        if (error.response.data?.non_field_errors) {
+          message = error.response.data.non_field_errors[0];
+        } else if (error.response.data?.detail) {
+          message = error.response.data.detail;
+        } else if (error.response.data?.error) {
+          message = error.response.data.error;
+        } else if (typeof error.response.data === 'string') {
+          message = error.response.data;
+        } else if (Object.keys(error.response.data).length > 0) {
+          const firstErrorField = Object.keys(error.response.data)[0];
+          const errorValue = error.response.data[firstErrorField];
+          message = Array.isArray(errorValue) ? errorValue[0] : errorValue;
+        }
+      }
+      
+      return { 
+        success: false,
+        message
+      };
+    } finally {
+      setIsLoading(false);
     }
-    
-    return { 
-      success: false,
-      message: 'Invalid username or password'
-    };
   };
   
   // Register function
   const register = async (username: string, email: string, password: string): Promise<{ success: boolean; message?: string }> => {
-    // Check if username or email already exists
-    const userExists = testUsers.some(
-      user => user.username === username || user.email === email
-    );
-    
-    if (userExists) {
+    try {
+      setIsLoading(true);
+      const response = await api.post('/auth/register/', { 
+        username, 
+        email, 
+        password 
+      });
+      
+      // Save the auth token
+      localStorage.setItem('auth_token', response.data.token);
+      
+      // Set the user state
+      setUser(response.data.user);
+      
+      // Use hard navigation instead of router.push
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 100);
+      
+      return { success: true };
+    } catch (error: any) {
+      // Handle different error response formats
+      let message = 'Registration failed. Please try again.';
+      
+      if (error.response) {
+        if (error.response.data?.non_field_errors) {
+          message = error.response.data.non_field_errors[0];
+        } else if (error.response.data?.detail) {
+          message = error.response.data.detail;
+        } else if (error.response.data?.error) {
+          message = error.response.data.error;
+        } else if (typeof error.response.data === 'string') {
+          message = error.response.data;
+        } else if (Object.keys(error.response.data).length > 0) {
+          const firstErrorField = Object.keys(error.response.data)[0];
+          const errorValue = error.response.data[firstErrorField];
+          message = Array.isArray(errorValue) ? errorValue[0] : errorValue;
+        }
+      }
+      
       return {
         success: false,
-        message: 'Username or email already exists'
+        message
       };
+    } finally {
+      setIsLoading(false);
     }
-    
-    // Create new user
-    const newUser: TestUser = {
-      id: testUsers.length + 1,
-      username,
-      email,
-      password
-    };
-    
-    // Add to test users array (this would normally be a database operation)
-    testUsers.push(newUser);
-    
-    // Create user data for state
-    const userData: User = {
-      id: newUser.id,
-      username: newUser.username,
-      email: newUser.email
-    };
-    
-    // Update state and localStorage
-    setUser(userData);
-    localStorage.setItem('user', JSON.stringify(userData));
-    
-    // Redirect to homepage
-    router.push('/');
-    
-    return { success: true };
   };
   
   // Logout function
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('user');
-    router.push('/login');
+  const logout = async () => {
+    try {
+      setIsLoading(true);
+      // Call the logout endpoint
+      await api.post('/auth/logout/');
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      // Always clear token and user state
+      localStorage.removeItem('auth_token');
+      setUser(null);
+      
+      // Use hard navigation instead of router.push
+      setTimeout(() => {
+        window.location.href = '/login';
+      }, 100);
+      
+      setIsLoading(false);
+    }
   };
 
   return (
