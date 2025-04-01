@@ -1619,10 +1619,6 @@ export default function ReadingMode({
                     <span className="inline-block w-4 h-4 bg-purple-100 rounded"></span>
                     <span>New word</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block text-primary">Word</span>
-                    <span>Mastered word</span>
-                  </div>
                 </div>
                 <div className="mt-4 p-2 bg-blue-50 rounded-lg">
                   <h4 className="font-medium mb-1">Keyboard Shortcuts:</h4>

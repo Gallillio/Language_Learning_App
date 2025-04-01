@@ -3,9 +3,9 @@
 import { useEffect, RefObject } from 'react';
 
 export function useOutsideClick(
-  ref: RefObject<HTMLElement>,
+  ref: RefObject<HTMLElement | null>,
   handler: () => void,
-  excludeRefs: RefObject<HTMLElement>[] = []
+  excludeRefs: RefObject<HTMLElement | null>[] = []
 ) {
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
