@@ -12,6 +12,7 @@ import {
   unmarkAsLearned as apiUnmarkAsLearned,
   updateConfidence as apiUpdateConfidence
 } from "../services/wordService"
+import { FSRS, Rating, Card, SchedulingInfo } from "fsrs.js"
 
 export interface Word {
   id: number
@@ -26,11 +27,19 @@ export interface Word {
   language: string
   userId?: number // Add userId to associate words with users
   
-  // SM-2 spaced repetition fields
-  ease_factor?: number // Starts at 2.5, adjusted based on performance
-  interval?: number // Current interval in days
-  repetitions?: number // Number of successful reviews in a row
-  next_review_date?: string // Date string for next review
+  // FSRS fields
+  due?: string // Due date as ISO string
+  stability?: number // Memory stability value 
+  difficulty?: number // Card difficulty value (0.0 - 1.0)
+  elapsed_days?: number // Days since last review
+  scheduled_days?: number // Days until next review
+  reps?: number // Number of repetitions
+  lapses?: number // Number of review failures (Again ratings)
+  state?: number // Card state (0=New, 1=Learning, 2=Review, 3=Relearning)
+  last_review?: string // Date of last review as ISO string
+  interval?: number // Current interval in days (for compatibility)
+  next_review_date?: string // Date string for next review (legacy)
+  repetitions?: number // Number of successful reviews (legacy)
   
   // History tracking for reviews
   history?: Array<{
@@ -55,6 +64,35 @@ interface WordBankContextType {
 }
 
 const WordBankContext = createContext<WordBankContextType | undefined>(undefined)
+
+// Initialize the FSRS algorithm with default parameters
+const fsrs = new FSRS();
+
+// Convert our quality rating to FSRS Rating
+// Again = 1 -> FSRS.Rating.Again (1)
+// Hard = 2 -> FSRS.Rating.Hard (2)
+// Good = 3 -> FSRS.Rating.Good (3)
+// Easy = 4 -> FSRS.Rating.Easy (4)
+const qualityToFsrsRating = (quality: number): Rating => {
+  switch (quality) {
+    case 1: return Rating.Again;
+    case 2: return Rating.Hard;
+    case 3: return Rating.Good;
+    case 4: return Rating.Easy;
+    default: return Rating.Good;
+  }
+};
+
+// Convert FSRS Rating to our quality rating for history and backward compatibility
+const fsrsRatingToQuality = (rating: Rating): number => {
+  switch (rating) {
+    case Rating.Again: return 1;
+    case Rating.Hard: return 2;
+    case Rating.Good: return 3;
+    case Rating.Easy: return 4;
+    default: return 3;
+  }
+};
 
 export function WordBankProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
@@ -303,7 +341,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
     return null;
   };
 
-  // Schedule a review for a word using a simplified SM-2 algorithm
+  // Schedule a review for a word using FSRS algorithm
   const scheduleReview = (id: number, quality: number) => {
     if (!user) return;
     
@@ -314,136 +352,176 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
     
     if (!word) return;
     
-    // Initialize fields if they don't exist
-    const repetitions = word.repetitions ?? 0;
-    const interval = word.interval ?? 0;
-    const history = word.history || [];
     const now = new Date();
-    let nextReviewDate = new Date(now);
-    let newInterval = interval;
-    let newRepetitions = repetitions;
+    const rating = qualityToFsrsRating(quality);
     
-    // Check if this is a new card (no previous history)
-    const isNewCard = history.length === 0;
-    
-    if (quality === 1) { // "Again" button
-      // For new cards or cards that have never been rated "Good",
-      // always set to 1 minute regardless of history
-      if (isNewCard || newRepetitions === 0) {
-        nextReviewDate.setMinutes(now.getMinutes() + 1);
-        newInterval = 0;
-        newRepetitions = 0;
-      } else {
-        // Card has been rated "Good" before, set to 10 minutes
-        nextReviewDate.setMinutes(now.getMinutes() + 10);
-        newInterval = 0;
-        newRepetitions = 0;
-      }
-    } else { // "Good" button (quality = 4)
-      // Increase repetitions for consecutive "Good" ratings
-      newRepetitions++;
+    try {
+      // Create a card object with FSRS parameters using object literal instead of constructor
+      const card = {
+        due: word.due ? new Date(word.due) : now,
+        stability: word.stability ?? 0,
+        difficulty: word.difficulty ?? 0.3,
+        elapsed_days: word.elapsed_days ?? 0,
+        scheduled_days: word.scheduled_days ?? 0,
+        reps: word.reps ?? 0,
+        lapses: word.lapses ?? 0,
+        state: word.state ?? 0,
+        last_review: word.last_review ? new Date(word.last_review) : now
+      };
       
-      // Progressive intervals based on consecutive correct answers
-      if (newRepetitions === 1) {
-        // First "Good" - review in 10 minutes
-        nextReviewDate.setMinutes(now.getMinutes() + 10);
-        newInterval = 0;
-      } else if (newRepetitions === 2) {
-        // Second consecutive "Good" - review in 1 day
-        nextReviewDate.setDate(now.getDate() + 1);
-        newInterval = 1;
-      } else if (newRepetitions === 3) {
-        // Third consecutive "Good" - review in 3 days
-        nextReviewDate.setDate(now.getDate() + 3);
-        newInterval = 3;
-      } else if (newRepetitions === 4) {
-        // Fourth consecutive "Good" - review in 7 days
-        nextReviewDate.setDate(now.getDate() + 7);
-        newInterval = 7;
-      } else if (newRepetitions === 5) {
-        // Fifth consecutive "Good" - review in 14 days
-        nextReviewDate.setDate(now.getDate() + 14);
-        newInterval = 14;
-      } else if (newRepetitions === 6) {
-        // Sixth consecutive "Good" - review in 30 days
-        nextReviewDate.setDate(now.getDate() + 30);
-        newInterval = 30;
-      } else {
-        // More than six consecutive "Good" - double previous interval
-        newInterval = interval * 2;
-        nextReviewDate.setDate(now.getDate() + newInterval);
+      // Get scheduling information from FSRS
+      const result = fsrs.repeat(card, now);
+      
+      // The result has structure like: { 1: SchedulingInfo, 2: SchedulingInfo, ... }
+      // We need to extract the SchedulingInfo for our rating
+      const schedulingInfo = result[rating];
+      
+      if (!schedulingInfo) {
+        throw new Error("FSRS scheduling failed to return info for the given rating");
       }
+      
+      // The updated card is in schedulingInfo.card
+      const nextCard = schedulingInfo.card;
+      
+      // Calculate interval in days for display/compatibility
+      let intervalInDays = 0;
+      if (nextCard.due) {
+        intervalInDays = Math.round((nextCard.due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      }
+      
+      // Update learning state based on scheduling
+      // If due date is more than 21 days in the future, consider it "learned"
+      const isLearned = intervalInDays > 21;
+      
+      // Create history entry for this review
+      const historyEntry = {
+        date: now.toISOString(),
+        quality: quality
+      };
+      
+      // Update the word with FSRS parameters and history
+      const updates: Partial<Word> = {
+        due: nextCard.due.toISOString(),
+        stability: nextCard.stability,
+        difficulty: nextCard.difficulty,
+        elapsed_days: nextCard.elapsed_days,
+        scheduled_days: nextCard.scheduled_days,
+        reps: nextCard.reps,
+        lapses: nextCard.lapses,
+        state: nextCard.state,
+        last_review: now.toISOString(),
+        
+        // For compatibility with existing code
+        interval: intervalInDays,
+        repetitions: nextCard.reps,
+        next_review_date: nextCard.due.toISOString(),
+        last_practiced: now.toISOString(),
+        confidence: quality,
+        learned: isLearned,
+        
+        // Append new history entry
+        history: [...(word.history || []), historyEntry]
+      };
+      
+      // Apply updates to the word in the appropriate list
+      updateWord(id, updates);
+    } catch (error) {
+      console.error("Error scheduling with FSRS:", error);
+      // Fallback to a simple scheduling algorithm if FSRS fails
+      const fallbackInterval = quality * 2; // Simple interval based on quality
+      const fallbackDueDate = new Date(now);
+      fallbackDueDate.setDate(fallbackDueDate.getDate() + fallbackInterval);
+      
+      const updates: Partial<Word> = {
+        due: fallbackDueDate.toISOString(),
+        last_review: now.toISOString(),
+        last_practiced: now.toISOString(),
+        interval: fallbackInterval,
+        confidence: quality,
+        history: [...(word.history || []), { date: now.toISOString(), quality }]
+      };
+      
+      updateWord(id, updates);
     }
-    
-    // Create history entry for this review
-    const historyEntry = {
-      date: now.toISOString(),
-      quality: quality
-    };
-    
-    // Update the word with history
-    const updates = {
-      interval: newInterval,
-      repetitions: newRepetitions,
-      next_review_date: nextReviewDate.toISOString(),
-      last_practiced: now.toISOString(),
-      confidence: quality, // Keep confidence for backward compatibility
-      // Append new history entry to existing history
-      history: [...history, historyEntry]
-    };
-    
-    // Apply updates to the word in the appropriate list
-    updateWord(id, updates);
   };
 
-  // Get words for review based on their scheduled review dates
+  // Get words for review based on their scheduled due dates
   const getWordsForReview = () => {
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(now.getDate() + 1);
-    const dayAfterTomorrow = new Date(now);
-    dayAfterTomorrow.setDate(now.getDate() + 2);
     
     // Combine both lists for processing
     const allWords = [...learningWords, ...learnedWords];
     
-    // Filter words into appropriate review groups
+    // Filter words into appropriate review groups based on FSRS due dates
     const todayWords = allWords.filter(word => {
-      if (!word.next_review_date) return true; // New words with no next_review_date go to today
+      if (!word.due) return true; // New words with no due date go to today
       
-      const nextReview = new Date(word.next_review_date);
-      return nextReview <= now; // Due now or overdue
+      const dueDate = new Date(word.due);
+      return dueDate <= now; // Due now or overdue
     });
     
+    // Words due within the next 60 minutes should also appear in today's review
     const shortTermWords = allWords.filter(word => {
-      if (!word.next_review_date) return false;
+      if (!word.due) return false;
       
-      const nextReview = new Date(word.next_review_date);
+      const dueDate = new Date(word.due);
       // Words due within the next hour but not yet due
-      return nextReview > now && 
-             nextReview <= new Date(now.getTime() + 60 * 60 * 1000);
+      return dueDate > now && 
+             dueDate <= new Date(now.getTime() + 60 * 60 * 1000);
     });
     
+    // Words due later today (after an hour but before midnight)
+    const laterTodayWords = allWords.filter(word => {
+      if (!word.due) return false;
+      
+      const dueDate = new Date(word.due);
+      const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
+      
+      // End of today (midnight)
+      const endOfToday = new Date(now);
+      endOfToday.setHours(23, 59, 59, 999);
+      
+      return dueDate > oneHourLater && dueDate <= endOfToday;
+    });
+    
+    // Words due tomorrow
     const tomorrowWords = allWords.filter(word => {
-      if (!word.next_review_date) return false;
+      if (!word.due) return false;
       
-      const nextReview = new Date(word.next_review_date);
-      const hourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-      // Words due after an hour but before tomorrow
-      return nextReview > hourFromNow && nextReview < tomorrow;
+      const dueDate = new Date(word.due);
+      
+      // Start of tomorrow
+      const startOfTomorrow = new Date(now);
+      startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+      startOfTomorrow.setHours(0, 0, 0, 0);
+      
+      // End of tomorrow
+      const endOfTomorrow = new Date(startOfTomorrow);
+      endOfTomorrow.setHours(23, 59, 59, 999);
+      
+      return dueDate >= startOfTomorrow && dueDate <= endOfTomorrow;
     });
     
+    // Words due after tomorrow
     const laterWords = allWords.filter(word => {
-      if (!word.next_review_date) return false;
+      if (!word.due) return false;
       
-      const nextReview = new Date(word.next_review_date);
-      return nextReview >= tomorrow;
+      const dueDate = new Date(word.due);
+      
+      // Start of day after tomorrow
+      const dayAfterTomorrow = new Date(now);
+      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+      dayAfterTomorrow.setHours(0, 0, 0, 0);
+      
+      return dueDate >= dayAfterTomorrow;
     });
     
-    // Combine today and shortTerm words for immediate review
+    // Combine today, shortTerm and later today words for immediate review
     return {
       today: [...todayWords, ...shortTermWords],
-      tomorrow: tomorrowWords,
+      tomorrow: [...laterTodayWords, ...tomorrowWords],
       later: laterWords
     };
   };

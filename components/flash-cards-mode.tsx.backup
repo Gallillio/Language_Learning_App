@@ -90,23 +90,33 @@ export default function FlashCardsMode({
     // Schedule for review with quality 1 (Again)
     scheduleReview(currentWord.id, 1);
 
-    // Refresh all groups to ensure cards are properly categorized
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
+    // Remove the current card from today's stack temporarily
+    const updatedToday = [...reviewGroups.today];
+    updatedToday.splice(currentCardIndex, 1);
+
+    setReviewGroups({
+      ...reviewGroups,
+      today: updatedToday,
+    });
+
+    // Check if this was the last card
+    if (updatedToday.length > 0) {
+      setIsFlipped(false);
+      setTimeout(() => {
+        setCurrentCardIndex(currentCardIndex >= updatedToday.length ? 0 : currentCardIndex);
+      }, 300);
+    } else {
+      // No more cards for now
       setCurrentCardIndex(0);
+      setIsFlipped(false);
     }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
-    }
+
+    // Set up a timer to refresh the review groups after a minute
+    // This will bring back the card that was just marked as "Again"
+    setTimeout(() => {
+      const updatedGroups = getWordsForReview();
+      setReviewGroups(updatedGroups);
+    }, 65 * 1000); // 65 seconds to ensure the 1-minute delay has passed
   };
 
   const handleHard = () => {
@@ -118,22 +128,25 @@ export default function FlashCardsMode({
     // Schedule for review with quality 2 (Hard)
     scheduleReview(currentWord.id, 2);
 
-    // Refresh all groups to ensure cards are properly categorized
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
+    // Remove the card from today's stack
+    const updatedToday = [...reviewGroups.today];
+    updatedToday.splice(currentCardIndex, 1);
+
+    setReviewGroups({
+      ...reviewGroups,
+      today: updatedToday,
+    });
+
+    // Move to next card or reset if this was the last card
+    if (updatedToday.length > 0) {
+      setIsFlipped(false);
+      setTimeout(() => {
+        setCurrentCardIndex(currentCardIndex >= updatedToday.length ? 0 : currentCardIndex);
+      }, 300);
+    } else {
+      // No more cards for today
       setCurrentCardIndex(0);
-    }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
+      setIsFlipped(false);
     }
   };
 
@@ -146,22 +159,25 @@ export default function FlashCardsMode({
     // Schedule for review with quality 3 (Good)
     scheduleReview(currentWord.id, 3);
 
-    // Refresh all groups to ensure cards are properly categorized
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
+    // Remove from today's stack
+    const updatedToday = [...reviewGroups.today];
+    updatedToday.splice(currentCardIndex, 1);
+
+    setReviewGroups({
+      ...reviewGroups,
+      today: updatedToday,
+    });
+
+    // Move to next card or reset if this was the last card
+    if (updatedToday.length > 0) {
+      setIsFlipped(false);
+      setTimeout(() => {
+        setCurrentCardIndex(currentCardIndex >= updatedToday.length ? 0 : currentCardIndex);
+      }, 300);
+    } else {
+      // No more cards for today
       setCurrentCardIndex(0);
-    }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
+      setIsFlipped(false);
     }
   };
 
@@ -173,24 +189,26 @@ export default function FlashCardsMode({
 
     // Schedule for review with quality 4 (Easy)
     scheduleReview(currentWord.id, 4);
-    
-    // Instead of immediately removing the card, refresh all groups to ensure
-    // cards are properly categorized based on their updated due dates
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
+
+    // Remove from today's stack
+    const updatedToday = [...reviewGroups.today];
+    updatedToday.splice(currentCardIndex, 1);
+
+    setReviewGroups({
+      ...reviewGroups,
+      today: updatedToday,
+    });
+
+    // Move to next card or reset if this was the last card
+    if (updatedToday.length > 0) {
+      setIsFlipped(false);
+      setTimeout(() => {
+        setCurrentCardIndex(currentCardIndex >= updatedToday.length ? 0 : currentCardIndex);
+      }, 300);
+    } else {
+      // No more cards for today
       setCurrentCardIndex(0);
-    }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
+      setIsFlipped(false);
     }
   };
 
@@ -401,48 +419,26 @@ export default function FlashCardsMode({
     }
   };
 
-  // Add this for debugging
-  function fsrsDebug(msg: string, data?: any) {
-    console.log(`FSRS Debug: ${msg}`, data || '');
-  }
-
-  // Fix the getIntervalFromScheduling function which is used by the getPredictedIntervals function
-  const getIntervalFromScheduling = (dueDate: Date | undefined, now: Date): number => {
-    if (!dueDate) return 1; // Default to 1 minute if no due date
-    
-    const diffTime = dueDate.getTime() - now.getTime();
-    const diffMinutes = Math.round(diffTime / (1000 * 60));
-    
-    if (diffMinutes < 60 * 24) {
-      return diffMinutes; // Return minutes for short intervals
-    } else {
-      return Math.round(diffMinutes / (60 * 24)); // Return days for longer intervals
-    }
-  };
-
-  // Fix this function to use object literal instead of Card constructor
+  // Add this function to predict scheduling intervals for different ratings
   const getPredictedIntervals = (word: Word) => {
     const fsrs = new FSRS();
     const now = new Date();
     
-    // Create a card object using object literal instead of constructor
-    const card = {
-      due: word.due ? new Date(word.due) : now,
-      stability: word.stability ?? 0,
-      difficulty: word.difficulty ?? 0.3,
-      elapsed_days: word.elapsed_days ?? 0,
-      scheduled_days: word.scheduled_days ?? 0,
-      reps: word.reps ?? 0,
-      lapses: word.lapses ?? 0,
-      state: word.state ?? 0,
-      last_review: word.last_review ? new Date(word.last_review) : now
-    };
+    // Create a card object from word data
+    const card = new Card();
+    card.due = word.due ? new Date(word.due) : now;
+    card.stability = word.stability ?? 0;
+    card.difficulty = word.difficulty ?? 0.3;
+    card.elapsed_days = word.elapsed_days ?? 0;
+    card.scheduled_days = word.scheduled_days ?? 0;
+    card.reps = word.reps ?? 0;
+    card.lapses = word.lapses ?? 0;
+    card.state = word.state ?? 0;
+    card.last_review = word.last_review ? new Date(word.last_review) : now;
     
     // Get predictions for all ratings
     try {
-      fsrsDebug('Running fsrs.repeat with card:', card);
       const result = fsrs.repeat(card, now);
-      fsrsDebug('FSRS result:', result);
       
       // Create prediction map
       return {
@@ -462,11 +458,82 @@ export default function FlashCardsMode({
     }
   };
 
+  // Helper function to calculate interval in minutes/days from due date
+  const getIntervalFromScheduling = (dueDate: Date | undefined, now: Date): number => {
+    if (!dueDate) return 1; // Default to 1 minute if no due date
+    
+    const diffTime = dueDate.getTime() - now.getTime();
+    const diffMinutes = Math.round(diffTime / (1000 * 60));
+    
+    if (diffMinutes < 60 * 24) {
+      return diffMinutes; // Return minutes for short intervals
+    } else {
+      return Math.round(diffMinutes / (60 * 24)); // Return days for longer intervals
+    }
+  };
+
+  // Initialize Card with the correct parameters
+  function getPredictedInterval(word: Word, rating: Rating): string {
+    try {
+      const fsrs = new FSRS();
+      const now = new Date();
+      
+      // Create a card object from word data - fix the Card initialization
+      const card = {
+        due: word.due ? new Date(word.due) : now,
+        stability: word.stability ?? 0,
+        difficulty: word.difficulty ?? 0.3,
+        elapsed_days: word.elapsed_days ?? 0,
+        scheduled_days: word.scheduled_days ?? 0,
+        reps: word.reps ?? 0,
+        lapses: word.lapses ?? 0,
+        state: word.state ?? 0,
+        last_review: word.last_review ? new Date(word.last_review) : now
+      };
+      
+      // Get scheduling predictions from FSRS
+      const result = fsrs.repeat(card, now);
+      
+      if (result[rating]?.card?.due) {
+        const dueDate = result[rating].card.due;
+        const diffMinutes = Math.round((dueDate.getTime() - now.getTime()) / (1000 * 60));
+        
+        // Format the interval nicely
+        if (diffMinutes < 1) return "now";
+        if (diffMinutes < 60) return `${diffMinutes} min`;
+        if (diffMinutes < 60 * 24) return `${Math.floor(diffMinutes / 60)} hour${Math.floor(diffMinutes / 60) > 1 ? 's' : ''}`;
+        if (diffMinutes < 60 * 24 * 30) return `${Math.floor(diffMinutes / (60 * 24))} day${Math.floor(diffMinutes / (60 * 24)) > 1 ? 's' : ''}`;
+        if (diffMinutes < 60 * 24 * 365) return `${Math.floor(diffMinutes / (60 * 24 * 30))} month${Math.floor(diffMinutes / (60 * 24 * 30)) > 1 ? 's' : ''}`;
+        return `${Math.floor(diffMinutes / (60 * 24 * 365))} year${Math.floor(diffMinutes / (60 * 24 * 365)) > 1 ? 's' : ''}`;
+      }
+      
+      // Fallback values if prediction fails
+      switch (rating) {
+        case Rating.Again: return "1 min";
+        case Rating.Hard: return "10 min";
+        case Rating.Good: return "1 day";
+        case Rating.Easy: return "4 days";
+        default: return "?";
+      }
+    } catch (error) {
+      console.error("Error predicting interval:", error);
+      // Fallback values
+      switch (rating) {
+        case Rating.Again: return "1 min";
+        case Rating.Hard: return "10 min";
+        case Rating.Good: return "1 day";
+        case Rating.Easy: return "4 days";
+        default: return "?";
+      }
+    }
+  }
+
   return (
     <div className="flex flex-col items-center py-8">
       <h2 className="text-3xl font-bold text-center mb-6 text-primary">Flash Cards</h2>
 
       <div className="w-full max-w-3xl mb-8">
+        {/* Update the Tabs component */}
         <Tabs defaultValue="today" className="w-full" onValueChange={handleTabChange} value={activeTab}>
           <TabsList className="grid w-full grid-cols-3 mb-4">
             <TabsTrigger value="today" className="flex items-center gap-2">
@@ -649,43 +716,119 @@ export default function FlashCardsMode({
                 {/* Answer buttons and spaced repetition information - only show when card is flipped and a card exists */}
                 {isFlipped && reviewGroups.today.length > 0 && reviewGroups.today[currentCardIndex] && (
                   <>
-                    <div className="flex justify-center gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={handleAgain}
-                        className="flex-1 border-red-300 hover:bg-red-50 hover:text-red-600"
-                        title="I forgot this word completely"
-                      >
-                        Again ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).again})
-                      </Button>
+                    {/* Add prediction calculations for the buttons */}
+                    {(() => {
+                      // Calculate predicted intervals for each rating
+                      const fsrs = new FSRS();
+                      const now = new Date();
+                      const currentWord = reviewGroups.today[currentCardIndex];
+                      
+                      // Create a card object for FSRS correctly
+                      const card = {
+                        due: currentWord.due ? new Date(currentWord.due) : now,
+                        stability: currentWord.stability ?? 0,
+                        difficulty: currentWord.difficulty ?? 0.3,
+                        elapsed_days: currentWord.elapsed_days ?? 0,
+                        scheduled_days: currentWord.scheduled_days ?? 0,
+                        reps: currentWord.reps ?? 0,
+                        lapses: currentWord.lapses ?? 0,
+                        state: currentWord.state ?? 0,
+                        last_review: currentWord.last_review ? new Date(currentWord.last_review) : now
+                      };
+                      
+                      let predictions = {
+                        again: "1 min",
+                        hard: "5 min",
+                        good: "1 day",
+                        easy: "4 days"
+                      };
+                      
+                      try {
+                        // Get scheduling predictions from FSRS
+                        const result = fsrs.repeat(card, now);
+                        
+                        // Calculate intervals for each rating
+                        if (result[Rating.Again]?.card) {
+                          const againDate = result[Rating.Again].card.due;
+                          const againMinutes = Math.round((againDate.getTime() - now.getTime()) / (1000 * 60));
+                          predictions.again = againMinutes < 60 ? `${againMinutes} min` : 
+                                            againMinutes < 60 * 24 ? `${Math.floor(againMinutes / 60)} hour${Math.floor(againMinutes / 60) > 1 ? 's' : ''}` :
+                                            `${Math.floor(againMinutes / (60 * 24))} day${Math.floor(againMinutes / (60 * 24)) > 1 ? 's' : ''}`;
+                        }
+                        
+                        if (result[Rating.Hard]?.card) {
+                          const hardDate = result[Rating.Hard].card.due;
+                          const hardMinutes = Math.round((hardDate.getTime() - now.getTime()) / (1000 * 60));
+                          predictions.hard = hardMinutes < 60 ? `${hardMinutes} min` : 
+                                           hardMinutes < 60 * 24 ? `${Math.floor(hardMinutes / 60)} hour${Math.floor(hardMinutes / 60) > 1 ? 's' : ''}` :
+                                           hardMinutes < 60 * 24 * 30 ? `${Math.floor(hardMinutes / (60 * 24))} day${Math.floor(hardMinutes / (60 * 24)) > 1 ? 's' : ''}` :
+                                           `${Math.floor(hardMinutes / (60 * 24 * 30))} month${Math.floor(hardMinutes / (60 * 24 * 30)) > 1 ? 's' : ''}`;
+                        }
+                        
+                        if (result[Rating.Good]?.card) {
+                          const goodDate = result[Rating.Good].card.due;
+                          const goodMinutes = Math.round((goodDate.getTime() - now.getTime()) / (1000 * 60));
+                          predictions.good = goodMinutes < 60 ? `${goodMinutes} min` : 
+                                           goodMinutes < 60 * 24 ? `${Math.floor(goodMinutes / 60)} hour${Math.floor(goodMinutes / 60) > 1 ? 's' : ''}` :
+                                           goodMinutes < 60 * 24 * 30 ? `${Math.floor(goodMinutes / (60 * 24))} day${Math.floor(goodMinutes / (60 * 24)) > 1 ? 's' : ''}` :
+                                           goodMinutes < 60 * 24 * 365 ? `${Math.floor(goodMinutes / (60 * 24 * 30))} month${Math.floor(goodMinutes / (60 * 24 * 30)) > 1 ? 's' : ''}` :
+                                           `${Math.floor(goodMinutes / (60 * 24 * 365))} year${Math.floor(goodMinutes / (60 * 24 * 365)) > 1 ? 's' : ''}`;
+                        }
+                        
+                        if (result[Rating.Easy]?.card) {
+                          const easyDate = result[Rating.Easy].card.due;
+                          const easyMinutes = Math.round((easyDate.getTime() - now.getTime()) / (1000 * 60));
+                          predictions.easy = easyMinutes < 60 ? `${easyMinutes} min` : 
+                                           easyMinutes < 60 * 24 ? `${Math.floor(easyMinutes / 60)} hour${Math.floor(easyMinutes / 60) > 1 ? 's' : ''}` :
+                                           easyMinutes < 60 * 24 * 30 ? `${Math.floor(easyMinutes / (60 * 24))} day${Math.floor(easyMinutes / (60 * 24)) > 1 ? 's' : ''}` :
+                                           easyMinutes < 60 * 24 * 365 ? `${Math.floor(easyMinutes / (60 * 24 * 30))} month${Math.floor(easyMinutes / (60 * 24 * 30)) > 1 ? 's' : ''}` :
+                                           `${Math.floor(easyMinutes / (60 * 24 * 365))} year${Math.floor(easyMinutes / (60 * 24 * 365)) > 1 ? 's' : ''}`;
+                        }
+                      } catch (error) {
+                        console.error("Error predicting intervals:", error);
+                        // Use fallback values already set
+                      }
+                      
+                      return (
+                        <div className="flex justify-center gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={handleAgain}
+                            className="flex-1 border-red-300 hover:bg-red-50 hover:text-red-600"
+                            title="I forgot this word completely"
+                          >
+                            Again ({predictions.again})
+                          </Button>
 
-                      <Button
-                        variant="outline"
-                        onClick={handleHard}
-                        className="flex-1 border-orange-300 hover:bg-orange-50 hover:text-orange-600"
-                        title="I remembered with difficulty"
-                      >
-                        Hard ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).hard})
-                      </Button>
+                          <Button
+                            variant="outline"
+                            onClick={handleHard}
+                            className="flex-1 border-orange-300 hover:bg-orange-50 hover:text-orange-600"
+                            title="I remembered with difficulty"
+                          >
+                            Hard ({predictions.hard})
+                          </Button>
 
-                      <Button
-                        variant="outline"
-                        onClick={handleGood}
-                        className="flex-1 border-green-300 hover:bg-green-50 hover:text-green-600"
-                        title="I remembered well"
-                      >
-                        Good ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).good})
-                      </Button>
+                          <Button
+                            variant="outline"
+                            onClick={handleGood}
+                            className="flex-1 border-green-300 hover:bg-green-50 hover:text-green-600"
+                            title="I remembered well"
+                          >
+                            Good ({predictions.good})
+                          </Button>
 
-                      <Button
-                        variant="outline"
-                        onClick={handleEasy}
-                        className="flex-1 border-blue-300 hover:bg-blue-50 hover:text-blue-600"
-                        title="I remembered perfectly"
-                      >
-                        Easy ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).easy})
-                      </Button>
-                    </div>
+                          <Button
+                            variant="outline"
+                            onClick={handleEasy}
+                            className="flex-1 border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                            title="I remembered perfectly"
+                          >
+                            Easy ({predictions.easy})
+                          </Button>
+                        </div>
+                      );
+                    })()}
                     
                     <div className="mt-4 p-4 bg-slate-100 rounded-md text-xs text-slate-600">
                       <h4 className="font-bold mb-1 flex items-center gap-1">
@@ -721,7 +864,7 @@ export default function FlashCardsMode({
                       <h3 className="font-bold text-lg">{word.word}</h3>
                       <div className={getConfidenceBadgeClass(word.confidence, word.learned)}>
                         <span>{word.confidence}/5</span>
-                        <Star className="h-4 w-4 fill-current" />
+                        <Star className={`h-4 w-4 fill-current`} />
                       </div>
                     </div>
                     <p>{word.meaning}</p>
@@ -764,155 +907,4 @@ export default function FlashCardsMode({
                       <h3 className="font-bold text-lg">{word.word}</h3>
                       <div className={getConfidenceBadgeClass(word.confidence, word.learned)}>
                         <span>{word.confidence}/5</span>
-                        <Star className="h-4 w-4 fill-current" />
-                      </div>
-                    </div>
-                    <p>{word.meaning}</p>
-                    {word.exampleSentence && <p className="text-sm italic mt-2">"{word.exampleSentence}"</p>}
-                    {word.exampleSentenceTranslation && (
-                      <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
-                    )}
-                    <div className="mt-2 flex justify-end">
-                      <Button variant="ghost" size="sm" onClick={() => handleHistoryClick(word)}>
-                        <HistoryIcon className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleEditClick(word)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteClick(word)}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </Card>
-                ))
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
-      </div>
-
-      {/* Edit Word Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Edit Word</DialogTitle>
-            <DialogDescription>Update the information for this word.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="word" className="text-right">
-                Word
-              </Label>
-              <Input id="word" value={editingWord?.word || ""} disabled className="col-span-3 bg-gray-100" />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="meaning" className="text-right">
-                Meaning
-              </Label>
-              <Input
-                id="meaning"
-                value={editedMeaning}
-                onChange={(e) => setEditedMeaning(e.target.value)}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="example" className="text-right">
-                Example
-              </Label>
-              <Textarea
-                id="example"
-                value={editedExampleSentence}
-                onChange={(e) => setEditedExampleSentence(e.target.value)}
-                className="col-span-3"
-                rows={2}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="translation" className="text-right">
-                Translation
-              </Label>
-              <Textarea
-                id="translation"
-                value={editedExampleSentenceTranslation}
-                onChange={(e) => setEditedExampleSentenceTranslation(e.target.value)}
-                className="col-span-3"
-                rows={2}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={handleSaveEdit}>
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Delete Word</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this word? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* History Dialog */}
-      <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
-        <DialogContent className="sm:max-w-[550px] max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <HistoryIcon className="h-5 w-5" />
-              Review History for "{historyWord?.word}"
-            </DialogTitle>
-            <DialogDescription>
-              Review history shows when and how you rated this card in past sessions.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            {!historyWord?.history || historyWord.history.length === 0 ? (
-              <p className="text-center text-muted-foreground">No review history available for this word.</p>
-            ) : (
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-muted-foreground flex justify-between px-2 mb-2">
-                  <span>Date</span>
-                  <span>Rating</span>
-                </div>
-                {historyWord.history.slice().reverse().map((entry, index) => (
-                  <div key={index} className="flex justify-between items-center p-2 rounded-md hover:bg-gray-50">
-                    <span>{new Date(entry.date).toLocaleString()}</span>
-                    <span className={getQualityColorClass(entry.quality)}>
-                      {getQualityDescription(entry.quality)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={() => setIsHistoryDialogOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
+                        <Star className={`
