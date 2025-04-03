@@ -57,3 +57,18 @@ env/
 # Next.js
 .next/
 out/
+
+venv/
+/backend/venv
+/backend/env
+/venv
+/env
+
+__pycache__/
+backend/__pycache__/
+backend/*/__pycache__/
+backend/*/*/__pycache__/
+*.pyc
+# Python bytecode - anywhere in the repository
+**/__pycache__/
+**/*.py[cod]
