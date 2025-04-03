@@ -1,14 +1,26 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect } from "react"
-import { Card } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { motion } from "framer-motion"
-import { Clock, Calendar, CalendarDays, Star, Edit, Trash2, Info, History as HistoryIcon } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { useWordBank, type Word } from "@/contexts/word-bank-context"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { FSRS, Rating } from "fsrs.js"
+import {
+  ArrowRight,
+  RotateCcw,
+  Clock,
+  CalendarDays,
+  BarChart4,
+  Brain,
+  ThumbsDown,
+  ThumbsUp,
+  CheckCircle2,
+  Timer,
+  Settings as SettingsIcon,
+  X
+} from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -16,903 +28,621 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { FSRS, Rating } from "fsrs.js"
+import { Input } from "@/components/ui/input"
 
-// Update the component signature to accept props
-export default function FlashCardsMode({
-  state = { activeTab: "today" },
-  setState = () => {},
-}: {
-  state?: { activeTab: string }
-  setState?: (state: { activeTab: string }) => void
-} = {}) {
-  // Replace the activeTab state with a derived state from props
-  const [activeTab, setActiveTab] = useState(state.activeTab)
-
-  // Update the tab change handler
-  const handleTabChange = (value: string) => {
-    setActiveTab(value)
-    setState({ activeTab: value })
-  }
-
-  const [currentCardIndex, setCurrentCardIndex] = useState(0)
+export default function FlashCardsMode() {
+  // State for cards and UI
   const [isFlipped, setIsFlipped] = useState(false)
-  const [reviewGroups, setReviewGroups] = useState<{ today: Word[]; tomorrow: Word[]; later: Word[] }>({
-    today: [],
-    tomorrow: [],
-    later: [],
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [reviewComplete, setReviewComplete] = useState(false)
+  const [cardStack, setCardStack] = useState<Word[]>([])
+  const [pendingReviews, setPendingReviews] = useState<{word: Word, dueTime: Date}[]>([])
+  const [totalCards, setTotalCards] = useState(0)
+  const [reviewedCount, setReviewedCount] = useState(0)
+  const [showStats, setShowStats] = useState(false)
+  const [statsData, setStatsData] = useState({
+    again: 0,
+    hard: 0,
+    good: 0,
+    easy: 0
   })
-  const { scheduleReview, getWordsForReview, updateWord, deleteWord } = useWordBank()
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [editingWord, setEditingWord] = useState<Word | null>(null)
-  const [editedMeaning, setEditedMeaning] = useState("")
-  const [editedExampleSentence, setEditedExampleSentence] = useState("")
-  const [editedExampleSentenceTranslation, setEditedExampleSentenceTranslation] = useState("")
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false)
-  const [historyWord, setHistoryWord] = useState<Word | null>(null)
 
-  useEffect(() => {
-    // Get words for review
-    const groups = getWordsForReview()
-    setReviewGroups(groups)
-    setCurrentCardIndex(0)
-    setIsFlipped(false)
-  }, [getWordsForReview])
+  // Timer ref for checking pending reviews
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Get word bank context
+  const { getWordsForReview, scheduleReview } = useWordBank()
+
+  // Initialize FSRS for predictions
+  const fsrs = new FSRS()
   
-  // Add an effect to ensure currentCardIndex is valid
-  useEffect(() => {
-    // Reset currentCardIndex if it's out of bounds
-    if (reviewGroups.today.length === 0) {
-      setCurrentCardIndex(0);
-    } else if (currentCardIndex >= reviewGroups.today.length) {
-      setCurrentCardIndex(reviewGroups.today.length - 1);
-    }
-  }, [reviewGroups.today, currentCardIndex]);
-
-  const handleFlip = () => {
-    // Only flip if there are cards to review
-    if (reviewGroups.today.length === 0 || !reviewGroups.today[currentCardIndex]) return;
-    setIsFlipped(!isFlipped);
-  }
-
-  const handleAgain = () => {
-    // Safety check to ensure there are cards to review
-    if (reviewGroups.today.length === 0 || !reviewGroups.today[currentCardIndex]) return;
-
-    const currentWord = reviewGroups.today[currentCardIndex];
-
-    // Schedule for review with quality 1 (Again)
-    scheduleReview(currentWord.id, 1);
-
-    // Refresh all groups to ensure cards are properly categorized
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
-      setCurrentCardIndex(0);
-    }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
-    }
-  };
-
-  const handleHard = () => {
-    // Safety check to ensure there are cards to review
-    if (reviewGroups.today.length === 0 || !reviewGroups.today[currentCardIndex]) return;
-
-    const currentWord = reviewGroups.today[currentCardIndex];
-
-    // Schedule for review with quality 2 (Hard)
-    scheduleReview(currentWord.id, 2);
-
-    // Refresh all groups to ensure cards are properly categorized
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
-      setCurrentCardIndex(0);
-    }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
-    }
-  };
-
-  const handleGood = () => {
-    // Safety check to ensure there are cards to review
-    if (reviewGroups.today.length === 0 || !reviewGroups.today[currentCardIndex]) return;
-
-    const currentWord = reviewGroups.today[currentCardIndex];
-
-    // Schedule for review with quality 3 (Good)
-    scheduleReview(currentWord.id, 3);
-
-    // Refresh all groups to ensure cards are properly categorized
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
-      setCurrentCardIndex(0);
-    }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
-    }
-  };
-
-  const handleEasy = () => {
-    // Safety check to ensure there are cards to review
-    if (reviewGroups.today.length === 0 || !reviewGroups.today[currentCardIndex]) return;
-
-    const currentWord = reviewGroups.today[currentCardIndex];
-
-    // Schedule for review with quality 4 (Easy)
-    scheduleReview(currentWord.id, 4);
-    
-    // Instead of immediately removing the card, refresh all groups to ensure
-    // cards are properly categorized based on their updated due dates
-    const updatedGroups = getWordsForReview();
-    setReviewGroups(updatedGroups);
-    
-    // Reset flip state
-    setIsFlipped(false);
-    
-    // If we're at the last card, go to the first one, otherwise stay at current index
-    if (currentCardIndex >= updatedGroups.today.length) {
-      setCurrentCardIndex(0);
-    }
-    
-    // If no more cards today, show a message or redirect
-    if (updatedGroups.today.length === 0) {
-      // All reviews complete
-      setCurrentCardIndex(0);
-    }
-  };
-
-  const getConfidenceColor = (confidence: number, learned: boolean) => {
-    if (learned) return "text-green-600"
-
-    switch (confidence) {
-      case 1:
-        return "text-red-500"
-      case 2:
-        return "text-orange-500"
-      case 3:
-        return "text-amber-500"
-      case 4:
-        return "text-blue-500"
-      case 5:
-        return "text-green-500"
-      default:
-        return "text-gray-500"
-    }
-  }
-
-  const getConfidenceBadgeClass = (confidence: number, learned: boolean) => {
-    const baseClass = "flex items-center gap-1 px-2 py-1 rounded-full font-bold text-white"
-
-    if (learned) return `${baseClass} bg-green-600`
-
-    switch (confidence) {
-      case 1:
-        return `${baseClass} bg-red-500`
-      case 2:
-        return `${baseClass} bg-orange-500`
-      case 3:
-        return `${baseClass} bg-amber-500`
-      case 4:
-        return `${baseClass} bg-blue-500`
-      case 5:
-        return `${baseClass} bg-green-500`
-      default:
-        return `${baseClass} bg-gray-500`
-    }
-  }
-
-  const handleEditClick = (word: Word, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation() // Prevent card flip if event is provided
-    setEditingWord(word)
-    setEditedMeaning(word.meaning)
-    setEditedExampleSentence(word.exampleSentence || "")
-    setEditedExampleSentenceTranslation(word.exampleSentenceTranslation || "")
-    setIsEditDialogOpen(true)
-  }
-
-  const handleHistoryClick = (word: Word, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation() // Prevent card flip if event is provided
-    setHistoryWord(word)
-    setIsHistoryDialogOpen(true)
-  }
-
-  // Format the next review date in a user-friendly way
-  const formatNextReview = (dateString?: string) => {
-    if (!dateString) return "Not scheduled";
-    
-    const reviewDate = new Date(dateString);
-    const now = new Date();
-    const diffTime = reviewDate.getTime() - now.getTime();
-    const diffMinutes = Math.ceil(diffTime / (1000 * 60));
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffMinutes <= 0) return "Now";
-    if (diffMinutes < 60) return `${diffMinutes} minutes`;
-    if (diffMinutes < 120) return `1 hour`;
-    if (diffMinutes < 24 * 60) return `${Math.floor(diffMinutes / 60)} hours`;
-    if (diffDays === 1) return "Tomorrow";
-    if (diffDays < 7) return `${diffDays} days`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks`;
-    return `${Math.floor(diffDays / 30)} months`;
-  }
+  // Add settings state
+  const [showSettings, setShowSettings] = useState(false)
+  const [newCardsLimit, setNewCardsLimit] = useState(20)
+  const [limitEnabled, setLimitEnabled] = useState(false)
   
-  // Display interval information in a user-friendly way
-  const formatInterval = (interval?: number): string => {
-    if (!interval) return "New";
-    
-    // For minutes (interval is actual minutes when less than 1 day)
-    if (interval < 60) return `${interval} min`;
-    if (interval < 120) return `1 hour`;
-    if (interval < 24 * 60) return `${Math.floor(interval / 60)} hours`;
-    
-    // For days and longer (interval is days when 1 day or more)
-    if (interval === 1) return "1 day";
-    if (interval < 7) return `${interval} days`;
-    if (interval < 30) return `${Math.floor(interval / 7)} weeks`;
-    if (interval < 365) return `${Math.floor(interval / 30)} months`;
-    return `${Math.floor(interval / 365)} years`;
-  }
-
-  // Format stability value for display
-  const formatStability = (stability?: number) => {
-    if (stability === undefined || stability === null) return "New";
-    
-    // Round to 1 decimal place for display
-    const stabilityValue = Math.round(stability * 10) / 10;
-    
-    if (stabilityValue < 1) return `${stabilityValue.toFixed(1)} (Very low)`;
-    if (stabilityValue < 5) return `${stabilityValue.toFixed(1)} (Low)`;
-    if (stabilityValue < 15) return `${stabilityValue.toFixed(1)} (Medium)`;
-    if (stabilityValue < 30) return `${stabilityValue.toFixed(1)} (High)`;
-    return `${stabilityValue.toFixed(1)} (Very high)`;
-  }
-
-  // Format difficulty value for display
-  const formatDifficulty = (difficulty?: number) => {
-    if (difficulty === undefined || difficulty === null) return "Medium";
-    
-    // Convert to percentage
-    const pct = Math.round(difficulty * 100);
-    
-    if (pct < 20) return `${pct}% (Very easy)`;
-    if (pct < 40) return `${pct}% (Easy)`;
-    if (pct < 60) return `${pct}% (Medium)`;
-    if (pct < 80) return `${pct}% (Hard)`;
-    return `${pct}% (Very hard)`;
-  }
-
-  const handleSaveEdit = () => {
-    if (editingWord) {
-      updateWord(editingWord.id, {
-        meaning: editedMeaning,
-        exampleSentence: editedExampleSentence,
-        exampleSentenceTranslation: editedExampleSentenceTranslation,
-      })
-
-      // Update the current card if it's the one being edited
-      if (reviewGroups.today.length > 0 && reviewGroups.today[currentCardIndex].id === editingWord.id) {
-        const updatedToday = [...reviewGroups.today]
-        updatedToday[currentCardIndex] = {
-          ...updatedToday[currentCardIndex],
-          meaning: editedMeaning,
-          exampleSentence: editedExampleSentence,
-          exampleSentenceTranslation: editedExampleSentenceTranslation,
-        }
-        setReviewGroups({
-          ...reviewGroups,
-          today: updatedToday,
-        })
+  // Load settings from localStorage on component mount
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('flashcard-settings')
+    if (savedSettings) {
+      try {
+        const settings = JSON.parse(savedSettings)
+        if (settings.newCardsLimit) setNewCardsLimit(settings.newCardsLimit)
+        if (settings.limitEnabled !== undefined) setLimitEnabled(settings.limitEnabled)
+      } catch (error) {
+        console.error('Error loading settings:', error)
       }
-
-      setIsEditDialogOpen(false)
-      setEditingWord(null)
     }
-  }
-
-  const handleDeleteClick = (word: Word, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation() // Prevent card flip if event is provided
-    setConfirmDeleteId(word.id)
-    setIsDeleteDialogOpen(true)
-  }
-
-  const handleConfirmDelete = async () => {
-    if (confirmDeleteId) {
-      await deleteWord(confirmDeleteId)
+  }, [])
+  
+  // Save settings to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('flashcard-settings', JSON.stringify({
+      newCardsLimit,
+      limitEnabled
+    }))
+  }, [newCardsLimit, limitEnabled])
+  
+  // Load cards with limit applied
+  useEffect(() => {
+    const allWords = getWordsForReview().today
+    
+    // Apply new cards limit if enabled
+    let filteredWords = [...allWords]
+    if (limitEnabled) {
+      // Separate new cards from review cards
+      // New cards have state 0, or uninitialized state
+      const newCards = allWords.filter(word => {
+        // Ensure we properly identify new cards - they have state 0 or null/undefined state
+        return word.state === 0 || word.state === undefined || word.state === null;
+      });
       
-      // Refresh the review groups
-      const groups = getWordsForReview()
-      setReviewGroups(groups)
+      // All other cards are review cards that should always be shown
+      const reviewCards = allWords.filter(word => {
+        return word.state !== 0 && word.state !== undefined && word.state !== null;
+      });
       
-      // Reset current card if needed
-      if (reviewGroups.today.length <= currentCardIndex) {
-        setCurrentCardIndex(0)
+      console.log(`Found ${newCards.length} new cards and ${reviewCards.length} review cards`);
+      
+      // Limit new cards
+      const limitedNewCards = newCards.slice(0, newCardsLimit);
+      
+      // Combine review cards with limited new cards
+      filteredWords = [...reviewCards, ...limitedNewCards];
+      
+      console.log(`Applied limit: Showing ${limitedNewCards.length}/${newCards.length} new cards`);
+    }
+    
+    // Shuffle the cards to make the order less predictable
+    const shuffledWords = [...filteredWords].sort(() => Math.random() - 0.5);
+    
+    setCardStack(shuffledWords);
+    setTotalCards(shuffledWords.length);
+    
+    // Clean up timer on unmount
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
       }
-      
-      setIsDeleteDialogOpen(false)
-      setConfirmDeleteId(null)
-    }
-  }
-
-  // Get a human-readable description of a card state
-  const getCardState = (state?: number) => {
-    switch (state) {
-      case 0: return "New";
-      case 1: return "Learning";
-      case 2: return "Review";
-      case 3: return "Relearning";
-      default: return "New";
-    }
-  }
-
-  // Get the color class for a quality rating
-  const getQualityColorClass = (quality: number) => {
-    switch (quality) {
-      case 1: return "text-red-500";
-      case 2: 
-      case 3: return "text-orange-500";
-      case 4: return "text-green-500";
-      case 5: return "text-blue-500";
-      default: return "text-gray-500";
-    }
-  }
-
-  // Add this function to interpret quality rating numbers
-  const getQualityDescription = (quality: number): string => {
-    switch (quality) {
-      case 1: return "Again";
-      case 2: return "Hard";
-      case 3: return "Good";
-      case 4: return "Easy";
-      case 5: return "Mastered";
-      default: return "Unknown";
-    }
-  };
-
-  // Add this for debugging
-  function fsrsDebug(msg: string, data?: any) {
-    console.log(`FSRS Debug: ${msg}`, data || '');
-  }
-
-  // Fix the getIntervalFromScheduling function which is used by the getPredictedIntervals function
-  const getIntervalFromScheduling = (dueDate: Date | undefined, now: Date): number => {
-    if (!dueDate) return 1; // Default to 1 minute if no due date
-    
-    const diffTime = dueDate.getTime() - now.getTime();
-    const diffMinutes = Math.round(diffTime / (1000 * 60));
-    
-    if (diffMinutes < 60 * 24) {
-      return diffMinutes; // Return minutes for short intervals
-    } else {
-      return Math.round(diffMinutes / (60 * 24)); // Return days for longer intervals
-    }
-  };
-
-  // Fix this function to use object literal instead of Card constructor
-  const getPredictedIntervals = (word: Word) => {
-    const fsrs = new FSRS();
-    const now = new Date();
-    
-    // Create a card object using object literal instead of constructor
-    const card = {
-      due: word.due ? new Date(word.due) : now,
-      stability: word.stability ?? 0,
-      difficulty: word.difficulty ?? 0.3,
-      elapsed_days: word.elapsed_days ?? 0,
-      scheduled_days: word.scheduled_days ?? 0,
-      reps: word.reps ?? 0,
-      lapses: word.lapses ?? 0,
-      state: word.state ?? 0,
-      last_review: word.last_review ? new Date(word.last_review) : now
     };
-    
-    // Get predictions for all ratings
-    try {
-      fsrsDebug('Running fsrs.repeat with card:', card);
-      const result = fsrs.repeat(card, now);
-      fsrsDebug('FSRS result:', result);
+  }, [getWordsForReview, limitEnabled, newCardsLimit])
+
+  // Set up interval to check for pending reviews
+  useEffect(() => {
+    // Check every 5 seconds if there are cards due for re-review
+    timerRef.current = setInterval(() => {
+      const now = new Date()
       
-      // Create prediction map
-      return {
-        again: formatInterval(getIntervalFromScheduling(result[Rating.Again]?.card.due, now)),
-        hard: formatInterval(getIntervalFromScheduling(result[Rating.Hard]?.card.due, now)),
-        good: formatInterval(getIntervalFromScheduling(result[Rating.Good]?.card.due, now)),
-        easy: formatInterval(getIntervalFromScheduling(result[Rating.Easy]?.card.due, now))
-      };
-    } catch (error) {
-      console.error("Error predicting intervals:", error);
-      return {
-        again: "1 min",
-        hard: "5 min",
-        good: "1 day",
-        easy: "4 days"
-      };
+      // Find cards that are due for review
+      const dueCards = pendingReviews.filter(item => item.dueTime <= now)
+      
+      if (dueCards.length > 0) {
+        // Add due cards back to the review stack
+        setCardStack(prevStack => [...prevStack, ...dueCards.map(item => item.word)])
+        
+        // Remove these cards from pending reviews
+        setPendingReviews(prev => prev.filter(item => item.dueTime > now))
+        
+        // Update total cards count
+        setTotalCards(prev => prev + dueCards.length)
+      }
+    }, 5000)
+    
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
     }
-  };
+  }, [pendingReviews])
+
+  // Handler to flip the card
+  const handleFlip = () => {
+    if (cardStack.length === 0) return
+    setIsFlipped(!isFlipped)
+  }
+  
+  // Get the current card
+  const currentCard = cardStack[currentIndex]
+  
+  // Calculate when cards will be shown again based on rating
+  const getPredictedInterval = (rating: Rating): { text: string, dueDate: Date | null } => {
+    if (!currentCard) return { text: "", dueDate: null }
+    
+    try {
+      const now = new Date()
+      
+      // Create a card object for prediction
+      const card = {
+        due: currentCard.due ? new Date(currentCard.due) : now,
+        stability: currentCard.stability ?? 0,
+        difficulty: currentCard.difficulty ?? 0.3,
+        elapsed_days: currentCard.elapsed_days ?? 0,
+        scheduled_days: currentCard.scheduled_days ?? 0,
+        reps: currentCard.reps ?? 0,
+        lapses: currentCard.lapses ?? 0,
+        state: currentCard.state ?? 0,
+        last_review: currentCard.last_review ? new Date(currentCard.last_review) : now
+      }
+      
+      // Get prediction from FSRS
+      const result = fsrs.repeat(card, now)
+      const prediction = result[rating]?.card
+      
+      if (!prediction || !prediction.due) return { text: "unknown", dueDate: null }
+      
+      // Calculate the time difference
+      const diff = prediction.due.getTime() - now.getTime()
+      const diffMinutes = Math.floor(diff / (1000 * 60))
+      
+      // Format nicely
+      let text = "unknown"
+      if (diffMinutes < 1) text = "< 1 min"
+      else if (diffMinutes < 60) text = `${diffMinutes} min`
+      else if (diffMinutes < 60 * 24) {
+        const hours = Math.floor(diffMinutes / 60)
+        text = `${hours} ${hours === 1 ? 'hour' : 'hours'}`
+      }
+      else if (diffMinutes < 60 * 24 * 30) {
+        const days = Math.floor(diffMinutes / (60 * 24))
+        text = `${days} ${days === 1 ? 'day' : 'days'}`
+      }
+      else if (diffMinutes < 60 * 24 * 365) {
+        const months = Math.floor(diffMinutes / (60 * 24 * 30))
+        text = `${months} ${months === 1 ? 'month' : 'months'}`
+      }
+      else {
+        const years = Math.floor(diffMinutes / (60 * 24 * 365))
+        text = `${years} ${years === 1 ? 'year' : 'years'}`
+      }
+      
+      return { text, dueDate: prediction.due }
+    } catch (error) {
+      console.error("Prediction error:", error)
+      return { text: "unknown", dueDate: null }
+    }
+  }
+  
+  // Check if session is truly complete (no cards left to review and no pending reviews)
+  const isSessionComplete = () => {
+    return cardStack.length === 0 && pendingReviews.length === 0
+  }
+  
+  // Handle rating a card
+  const handleRate = (quality: number) => {
+    if (!currentCard) return
+    
+    // Update stats
+    setStatsData(prev => {
+      const key = quality === 1 ? 'again' : quality === 2 ? 'hard' : quality === 3 ? 'good' : 'easy'
+      return { ...prev, [key]: prev[key] + 1 }
+    })
+    
+    // Increment reviewed count
+    setReviewedCount(prev => prev + 1)
+    
+    // Schedule the review
+    scheduleReview(currentCard.id, quality)
+    
+    // Check if this card should be reviewed again in this session
+    const rating = quality === 1 ? Rating.Again : 
+                   quality === 2 ? Rating.Hard : 
+                   quality === 3 ? Rating.Good : Rating.Easy
+    
+    const prediction = getPredictedInterval(rating)
+    
+    // If the card is due within 15 minutes, add it to pending reviews
+    const predictionDueDate = prediction.dueDate;
+    if (predictionDueDate) {
+      const now = new Date()
+      const fifteenMinutesLater = new Date(now.getTime() + 15 * 60 * 1000)
+      
+      if (predictionDueDate <= fifteenMinutesLater) {
+        // Now we're using the narrowed type that TypeScript recognizes as Date (not Date | null)
+        setPendingReviews(prev => [...prev, { 
+          word: currentCard,
+          dueTime: predictionDueDate
+        }])
+      }
+    }
+    
+    // Remove the current card from the stack
+    const updatedStack = [...cardStack]
+    updatedStack.splice(currentIndex, 1)
+    setCardStack(updatedStack)
+    
+    // Reset flip state
+    setIsFlipped(false)
+    
+    // Move to the next card or end session if done
+    if (updatedStack.length > 0) {
+      // If we removed the last card, go back to the beginning
+      if (currentIndex >= updatedStack.length) {
+        setCurrentIndex(0)
+      }
+      // Otherwise stay at the same index (which now points to the next card)
+    } else {
+      // Check if there are pending reviews
+      if (pendingReviews.length > 0) {
+        // Show a message that we're waiting for cards to be due
+        setReviewComplete(false)
+        // The interval will add cards back when they're due
+      } else {
+        // All done!
+        setReviewComplete(true)
+      }
+    }
+  }
+  
+  // Formatting helpers
+  const formatDifficulty = (difficulty?: number) => {
+    if (difficulty === undefined) return "Medium"
+    const pct = Math.round((difficulty || 0.5) * 100)
+    if (pct < 30) return "Easy"
+    if (pct < 70) return "Medium"
+    return "Difficult"
+  }
+  
+  const getDifficultyColor = (difficulty?: number) => {
+    if (difficulty === undefined) return "bg-blue-500"
+    const pct = Math.round((difficulty || 0.5) * 100)
+    if (pct < 30) return "bg-green-500" 
+    if (pct < 70) return "bg-amber-500"
+    return "bg-red-500"
+  }
+  
+  // Waiting screen for pending reviews
+  if (cardStack.length === 0 && pendingReviews.length > 0) {
+    // Find the next card's due time
+    const sortedReviews = [...pendingReviews].sort((a, b) => 
+      a.dueTime.getTime() - b.dueTime.getTime()
+    )
+    
+    const nextDueTime = sortedReviews[0].dueTime
+    const now = new Date()
+    const waitTimeMs = Math.max(0, nextDueTime.getTime() - now.getTime())
+    const waitTimeSeconds = Math.ceil(waitTimeMs / 1000)
+    
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="text-center p-8 max-w-md">
+          <Timer className="mx-auto h-12 w-12 text-blue-500 mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Cards Coming Soon</h2>
+          <p className="text-gray-600 mb-6">
+            {pendingReviews.length} card{pendingReviews.length > 1 ? 's' : ''} will be ready for review soon.
+          </p>
+          
+          <div className="bg-blue-50 rounded-lg p-4 mb-6">
+            <p className="text-blue-700">
+              Next card in: <span className="font-bold">{waitTimeSeconds} seconds</span>
+            </p>
+          </div>
+          
+          <p className="text-sm text-gray-500 mb-6">
+            The cards you marked for quick review will appear here when they're due.
+          </p>
+          
+          <Button variant="outline" onClick={() => window.location.reload()}>
+            Restart Session
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  
+  // If there are no cards to review
+  if (cardStack.length === 0 && pendingReviews.length === 0 && !reviewComplete) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="text-center p-8 max-w-md">
+          <CheckCircle2 className="mx-auto h-16 w-16 text-green-500 mb-4" />
+          <h2 className="text-2xl font-bold mb-2">All Done!</h2>
+          <p className="text-gray-600 mb-6">
+            You've completed all your reviews for today. Check back later for more cards.
+          </p>
+          <Button onClick={() => window.location.reload()}>
+            Refresh
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  
+  // If review is complete
+  if (reviewComplete) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="text-center p-8 max-w-md">
+          <CheckCircle2 className="mx-auto h-16 w-16 text-green-500 mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Review Complete!</h2>
+          <p className="text-gray-600 mb-6">
+            You've reviewed all {reviewedCount} cards in this session.
+          </p>
+          
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="bg-gray-100 p-4 rounded-lg">
+              <ThumbsDown className="h-5 w-5 text-red-500 mb-1 mx-auto" />
+              <p className="text-sm text-gray-700">Again: {statsData.again}</p>
+            </div>
+            <div className="bg-gray-100 p-4 rounded-lg">
+              <ThumbsUp className="h-5 w-5 text-orange-500 mb-1 mx-auto" />
+              <p className="text-sm text-gray-700">Hard: {statsData.hard}</p>
+            </div>
+            <div className="bg-gray-100 p-4 rounded-lg">
+              <ThumbsUp className="h-5 w-5 text-green-500 mb-1 mx-auto" />
+              <p className="text-sm text-gray-700">Good: {statsData.good}</p>
+            </div>
+            <div className="bg-gray-100 p-4 rounded-lg">
+              <CheckCircle2 className="h-5 w-5 text-blue-500 mb-1 mx-auto" />
+              <p className="text-sm text-gray-700">Easy: {statsData.easy}</p>
+            </div>
+          </div>
+          
+          <Button onClick={() => window.location.reload()}>
+            Start New Session
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex flex-col items-center py-8">
-      <h2 className="text-3xl font-bold text-center mb-6 text-primary">Flash Cards</h2>
-
-      <div className="w-full max-w-3xl mb-8">
-        <Tabs defaultValue="today" className="w-full" onValueChange={handleTabChange} value={activeTab}>
-          <TabsList className="grid w-full grid-cols-3 mb-4">
-            <TabsTrigger value="today" className="flex items-center gap-2">
-              <Clock className="h-4 w-4" /> Today ({reviewGroups.today.length})
-            </TabsTrigger>
-            <TabsTrigger value="tomorrow" className="flex items-center gap-2">
-              <Calendar className="h-4 w-4" /> Tomorrow ({reviewGroups.tomorrow.length})
-            </TabsTrigger>
-            <TabsTrigger value="later" className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4" /> Later ({reviewGroups.later.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="today">
-            {reviewGroups.today.length === 0 ? (
-              <Card className="w-full p-8 text-center">
-                <p className="text-muted-foreground mb-4">No cards to review today!</p>
-                <p>You've completed all your reviews for today. Check back later or review upcoming cards.</p>
-              </Card>
-            ) : (
-              <div className="w-full max-w-2xl mx-auto perspective-1000">
-                <div className="relative mb-8">
-                  <div className="text-center mb-4">
-                    <span className="text-sm text-muted-foreground">
-                      Card {currentCardIndex + 1} of {reviewGroups.today.length}
-                    </span>
+    <div className="max-w-2xl mx-auto p-4 relative">
+      {/* Settings button */}
+      <div className="absolute top-0 right-0">
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              aria-label="Settings"
+            >
+              <SettingsIcon className="h-5 w-5" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Flashcard Settings</DialogTitle>
+              <DialogDescription>
+                Customize your learning experience
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6 py-4">
+              {/* New Cards Limit */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <h3 className="text-base font-medium">Limit New Cards</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Restrict how many new cards you want to learn in this session
+                    </p>
                   </div>
-
-                  {reviewGroups.today[currentCardIndex] ? (
-                    <motion.div
-                      className="w-full h-96 cursor-pointer"
-                      onClick={handleFlip}
-                      animate={{ rotateY: isFlipped ? 180 : 0 }}
-                      transition={{ duration: 0.6 }}
-                      style={{ transformStyle: "preserve-3d" }}
-                    >
-                      {/* Front of card (shown first) */}
-                      <div
-                        className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col justify-center items-center
-                          ${isFlipped ? "opacity-0" : "opacity-100"} bg-gradient-to-br from-blue-400 to-purple-500 text-white shadow-xl`}
-                      >
-                        <div className="absolute top-4 right-4">
-                          <div
-                            className={getConfidenceBadgeClass(
-                              reviewGroups.today[currentCardIndex].confidence,
-                              reviewGroups.today[currentCardIndex].learned,
-                            )}
-                          >
-                            <span>{reviewGroups.today[currentCardIndex].confidence}/5</span>
-                            <Star className="h-4 w-4 fill-current" />
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute top-4 left-20 text-white hover:bg-white/20"
-                          onClick={(e) => handleDeleteClick(reviewGroups.today[currentCardIndex], e)}
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute top-4 left-12 text-white hover:bg-white/20"
-                          onClick={(e) => handleEditClick(reviewGroups.today[currentCardIndex], e)}
-                        >
-                          <Edit className="h-5 w-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute top-4 left-4 text-white hover:bg-white/20"
-                          onClick={(e) => handleHistoryClick(reviewGroups.today[currentCardIndex], e)}
-                        >
-                          <HistoryIcon className="h-5 w-5" />
-                        </Button>
-                        <h3 className="text-4xl font-bold mb-4">{reviewGroups.today[currentCardIndex].word}</h3>
-
-                        {/* Show example sentence in French on front */}
-                        {reviewGroups.today[currentCardIndex].exampleSentence && (
-                          <p className="text-lg italic mb-8 text-center">
-                            "{reviewGroups.today[currentCardIndex].exampleSentence}"
-                          </p>
-                        )}
-
-                        <p className="text-sm mt-4 text-blue-100">Click to flip</p>
-                      </div>
-
-                      {/* Back of card (shown after flip) */}
-                      <div
-                        className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col justify-center items-center
-                          ${isFlipped ? "opacity-100" : "opacity-0"} bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-xl`}
-                        style={{ transform: "rotateY(180deg)" }}
-                      >
-                        <div className="absolute top-4 right-4">
-                          <div
-                            className={getConfidenceBadgeClass(
-                              reviewGroups.today[currentCardIndex].confidence,
-                              reviewGroups.today[currentCardIndex].learned,
-                            )}
-                          >
-                            <span>{reviewGroups.today[currentCardIndex].confidence}/5</span>
-                            <Star className="h-4 w-4 fill-current" />
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute top-4 left-20 text-white hover:bg-white/20"
-                          onClick={(e) => handleDeleteClick(reviewGroups.today[currentCardIndex], e)}
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute top-4 left-12 text-white hover:bg-white/20"
-                          onClick={(e) => handleEditClick(reviewGroups.today[currentCardIndex], e)}
-                        >
-                          <Edit className="h-5 w-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute top-4 left-4 text-white hover:bg-white/20"
-                          onClick={(e) => handleHistoryClick(reviewGroups.today[currentCardIndex], e)}
-                        >
-                          <HistoryIcon className="h-5 w-5" />
-                        </Button>
-                        <h3 className="text-4xl font-bold mb-2">{reviewGroups.today[currentCardIndex].word}</h3>
-                        <p className="text-2xl mb-4">{reviewGroups.today[currentCardIndex].meaning}</p>
-
-                        {/* Show example sentence and translation on back */}
-                        {reviewGroups.today[currentCardIndex].exampleSentence && (
-                          <div className="mb-4 text-center">
-                            <p className="text-lg italic">"{reviewGroups.today[currentCardIndex].exampleSentence}"</p>
-                            {reviewGroups.today[currentCardIndex].exampleSentenceTranslation && (
-                              <p className="text-md mt-1">
-                                "{reviewGroups.today[currentCardIndex].exampleSentenceTranslation}"
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        
-                        {/* Card metrics display */}
-                        <div className="flex flex-col items-center mt-2 mb-2 text-xs text-white/80">
-                          <div className="flex items-center gap-1 mb-1">
-                            <Info className="h-3 w-3" />
-                            <span>Status: {getCardState(reviewGroups.today[currentCardIndex].state)}</span>
-                          </div>
-                          <div className="flex items-center gap-1 mb-1">
-                            <Info className="h-3 w-3" />
-                            <span>Memory stability: {formatStability(reviewGroups.today[currentCardIndex].stability)}</span>
-                          </div>
-                          <div className="flex items-center gap-1 mb-1">
-                            <Info className="h-3 w-3" />
-                            <span>Difficulty: {formatDifficulty(reviewGroups.today[currentCardIndex].difficulty)}</span>
-                          </div>
-                          <div className="flex items-center gap-1 mb-1">
-                            <Info className="h-3 w-3" />
-                            <span>Current interval: {formatInterval(reviewGroups.today[currentCardIndex].interval || 0)}</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            <span>Next review: {formatNextReview(reviewGroups.today[currentCardIndex].due)}</span>
-                          </div>
-                        </div>
-
-                        <p className="text-sm mt-2 text-pink-100">Click to flip back</p>
-                      </div>
-                    </motion.div>
-                  ) : (
-                    <Card className="w-full p-8 text-center">
-                      <p className="text-muted-foreground mb-4">No card found!</p>
-                      <p>There was an issue loading this card. Please refresh the page or check back later.</p>
-                    </Card>
-                  )}
+                  <Switch 
+                    checked={limitEnabled}
+                    onCheckedChange={setLimitEnabled}
+                  />
                 </div>
-
-                {/* Answer buttons and spaced repetition information - only show when card is flipped and a card exists */}
-                {isFlipped && reviewGroups.today.length > 0 && reviewGroups.today[currentCardIndex] && (
-                  <>
-                    <div className="flex justify-center gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={handleAgain}
-                        className="flex-1 border-red-300 hover:bg-red-50 hover:text-red-600"
-                        title="I forgot this word completely"
-                      >
-                        Again ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).again})
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={handleHard}
-                        className="flex-1 border-orange-300 hover:bg-orange-50 hover:text-orange-600"
-                        title="I remembered with difficulty"
-                      >
-                        Hard ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).hard})
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={handleGood}
-                        className="flex-1 border-green-300 hover:bg-green-50 hover:text-green-600"
-                        title="I remembered well"
-                      >
-                        Good ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).good})
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={handleEasy}
-                        className="flex-1 border-blue-300 hover:bg-blue-50 hover:text-blue-600"
-                        title="I remembered perfectly"
-                      >
-                        Easy ({getPredictedIntervals(reviewGroups.today[currentCardIndex]).easy})
-                      </Button>
+                
+                {limitEnabled && (
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={newCardsLimit}
+                        onChange={(e) => setNewCardsLimit(parseInt(e.target.value) || 20)}
+                        className="w-20"
+                      />
+                      <Label>New cards</Label>
                     </div>
                     
-                    <div className="mt-4 p-4 bg-slate-100 rounded-md text-xs text-slate-600">
-                      <h4 className="font-bold mb-1 flex items-center gap-1">
-                        <Info className="h-3 w-3" /> About FSRS Spaced Repetition
-                      </h4>
-                      <p className="mb-1">
-                        This flashcard system uses the Free Spaced Repetition Scheduler (FSRS) algorithm 
-                        that optimizes your learning by predicting when you're likely to forget:
-                      </p>
-                      <ul className="list-disc pl-4 space-y-1">
-                        <li><span className="text-red-500 font-bold">Again</span>: You forgot this card - it will reappear soon for intensive review</li>
-                        <li><span className="text-orange-500 font-bold">Hard</span>: You remembered with difficulty - the next interval will be shorter</li>
-                        <li><span className="text-green-500 font-bold">Good</span>: You remembered correctly - optimal interval increase</li>
-                        <li><span className="text-blue-500 font-bold">Easy</span>: You remembered easily - larger interval increase</li>
-                      </ul>
-                    </div>
-                  </>
+                    <Slider
+                      value={[newCardsLimit]}
+                      min={1}
+                      max={50}
+                      step={1}
+                      onValueChange={(vals) => setNewCardsLimit(vals[0])}
+                      className="py-2"
+                    />
+                    
+                    <p className="text-xs text-muted-foreground pt-1">
+                      You will still see all your review cards, but only up to {newCardsLimit} new cards.
+                    </p>
+                  </div>
                 )}
               </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="tomorrow">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {reviewGroups.tomorrow.length === 0 ? (
-                <Card className="w-full p-8 text-center col-span-2">
-                  <p className="text-muted-foreground mb-4">No cards scheduled for tomorrow!</p>
-                </Card>
-              ) : (
-                reviewGroups.tomorrow.map((word) => (
-                  <Card key={word.id} className="p-4 relative">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-bold text-lg">{word.word}</h3>
-                      <div className={getConfidenceBadgeClass(word.confidence, word.learned)}>
-                        <span>{word.confidence}/5</span>
-                        <Star className="h-4 w-4 fill-current" />
-                      </div>
-                    </div>
-                    <p>{word.meaning}</p>
-                    {word.exampleSentence && <p className="text-sm italic mt-2">"{word.exampleSentence}"</p>}
-                    {word.exampleSentenceTranslation && (
-                      <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
-                    )}
-                    <div className="mt-2 flex justify-end">
-                      <Button variant="ghost" size="sm" onClick={() => handleHistoryClick(word)}>
-                        <HistoryIcon className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleEditClick(word)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteClick(word)}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </Card>
-                ))
-              )}
+              
+              {/* Could add more settings here */}
             </div>
-          </TabsContent>
-
-          <TabsContent value="later">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {reviewGroups.later.length === 0 ? (
-                <Card className="w-full p-8 text-center col-span-2">
-                  <p className="text-muted-foreground mb-4">No cards scheduled for later!</p>
-                </Card>
-              ) : (
-                reviewGroups.later.map((word) => (
-                  <Card key={word.id} className="p-4 relative">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-bold text-lg">{word.word}</h3>
-                      <div className={getConfidenceBadgeClass(word.confidence, word.learned)}>
-                        <span>{word.confidence}/5</span>
-                        <Star className="h-4 w-4 fill-current" />
-                      </div>
-                    </div>
-                    <p>{word.meaning}</p>
-                    {word.exampleSentence && <p className="text-sm italic mt-2">"{word.exampleSentence}"</p>}
-                    {word.exampleSentenceTranslation && (
-                      <p className="text-sm mt-1">"{word.exampleSentenceTranslation}"</p>
-                    )}
-                    <div className="mt-2 flex justify-end">
-                      <Button variant="ghost" size="sm" onClick={() => handleHistoryClick(word)}>
-                        <HistoryIcon className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleEditClick(word)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteClick(word)}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </Card>
-                ))
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                Apply Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
-
-      {/* Edit Word Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Edit Word</DialogTitle>
-            <DialogDescription>Update the information for this word.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="word" className="text-right">
-                Word
-              </Label>
-              <Input id="word" value={editingWord?.word || ""} disabled className="col-span-3 bg-gray-100" />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="meaning" className="text-right">
-                Meaning
-              </Label>
-              <Input
-                id="meaning"
-                value={editedMeaning}
-                onChange={(e) => setEditedMeaning(e.target.value)}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="example" className="text-right">
-                Example
-              </Label>
-              <Textarea
-                id="example"
-                value={editedExampleSentence}
-                onChange={(e) => setEditedExampleSentence(e.target.value)}
-                className="col-span-3"
-                rows={2}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="translation" className="text-right">
-                Translation
-              </Label>
-              <Textarea
-                id="translation"
-                value={editedExampleSentenceTranslation}
-                onChange={(e) => setEditedExampleSentenceTranslation(e.target.value)}
-                className="col-span-3"
-                rows={2}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={handleSaveEdit}>
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Delete Word</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this word? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* History Dialog */}
-      <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
-        <DialogContent className="sm:max-w-[550px] max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <HistoryIcon className="h-5 w-5" />
-              Review History for "{historyWord?.word}"
-            </DialogTitle>
-            <DialogDescription>
-              Review history shows when and how you rated this card in past sessions.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            {!historyWord?.history || historyWord.history.length === 0 ? (
-              <p className="text-center text-muted-foreground">No review history available for this word.</p>
-            ) : (
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-muted-foreground flex justify-between px-2 mb-2">
-                  <span>Date</span>
-                  <span>Rating</span>
-                </div>
-                {historyWord.history.slice().reverse().map((entry, index) => (
-                  <div key={index} className="flex justify-between items-center p-2 rounded-md hover:bg-gray-50">
-                    <span>{new Date(entry.date).toLocaleString()}</span>
-                    <span className={getQualityColorClass(entry.quality)}>
-                      {getQualityDescription(entry.quality)}
-                    </span>
-                  </div>
-                ))}
+      
+      {/* Progress bar */}
+      <div className="mb-4 flex items-center gap-2">
+        <Progress value={(reviewedCount / (totalCards + pendingReviews.length)) * 100} className="h-2" />
+        <span className="text-sm text-gray-500">
+          {reviewedCount}/{totalCards + pendingReviews.length}
+        </span>
+        
+        {pendingReviews.length > 0 && (
+          <span className="text-xs text-blue-500 ml-2">
+            + {pendingReviews.length} pending
+          </span>
+        )}
+      </div>
+      
+      {/* Card */}
+      <div className="perspective-1000 my-8 h-[400px]">
+        <motion.div
+          className="w-full h-full cursor-pointer relative"
+          onClick={handleFlip}
+          animate={{ rotateY: isFlipped ? 180 : 0 }}
+          transition={{ duration: 0.5 }}
+          style={{ transformStyle: "preserve-3d" }}
+        >
+          {/* Front of card */}
+          <div 
+            className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col 
+              ${isFlipped ? 'opacity-0' : 'opacity-100'} bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-xl`}
+          >
+            <div className="flex justify-between mb-4">
+              <div className="text-xs flex items-center gap-1">
+                <Brain className="h-3 w-3" />
+                <span>Difficulty: {formatDifficulty(currentCard?.difficulty)}</span>
               </div>
-            )}
+              <div className="text-xs flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                <span>Rep #{currentCard?.reps || 0}</span>
+              </div>
+            </div>
+            
+            <div className="flex-grow flex flex-col items-center justify-center">
+              <h2 className="text-4xl font-bold mb-8 text-center">{currentCard?.word}</h2>
+              
+              {currentCard?.exampleSentence && (
+                <p className="text-lg italic mb-4 text-center max-w-md">
+                  "{currentCard.exampleSentence}"
+                </p>
+              )}
+            </div>
+            
+            <p className="text-center text-white/70 text-sm mt-8">Tap to reveal meaning</p>
           </div>
-          <DialogFooter>
-            <Button type="button" onClick={() => setIsHistoryDialogOpen(false)}>
-              Close
+          
+          {/* Back of card */}
+          <div 
+            className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col 
+              ${isFlipped ? 'opacity-100' : 'opacity-0'} bg-gradient-to-br from-purple-500 to-pink-600 text-white shadow-xl`}
+            style={{ transform: "rotateY(180deg)" }}
+          >
+            <div className="flex justify-between mb-4">
+              <div className="text-xs flex items-center gap-1">
+                <BarChart4 className="h-3 w-3" />
+                <span>Stability: {(currentCard?.stability || 0).toFixed(1)}</span>
+              </div>
+              <div className="text-xs flex items-center gap-1">
+                <CalendarDays className="h-3 w-3" />
+                <span>State: {currentCard?.state === 0 ? 'New' : 
+                  currentCard?.state === 1 ? 'Learning' : 
+                  currentCard?.state === 2 ? 'Review' : 'Relearning'}</span>
+              </div>
+            </div>
+            
+            <div className="flex-grow flex flex-col items-center justify-center">
+              <h3 className="text-xl font-medium mb-2 text-white/80">{currentCard?.word}</h3>
+              <p className="text-3xl font-bold mb-6 text-center">{currentCard?.meaning}</p>
+              
+              {currentCard?.exampleSentence && (
+                <div className="mt-2 text-center max-w-md">
+                  <p className="text-lg italic">{currentCard.exampleSentence}</p>
+                  {currentCard?.exampleSentenceTranslation && (
+                    <p className="text-base mt-1">{currentCard.exampleSentenceTranslation}</p>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            <p className="text-center text-white/70 text-sm mt-8">Tap to return to question</p>
+          </div>
+        </motion.div>
+      </div>
+      
+      {/* Rating buttons */}
+      <AnimatePresence>
+        {isFlipped && (
+          <motion.div 
+            className="grid grid-cols-4 gap-3 mt-6"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Button 
+              variant="outline" 
+              className="flex flex-col h-auto py-3 border-red-300 hover:bg-red-50 hover:text-red-600"
+              onClick={() => handleRate(1)}
+            >
+              <span className="text-red-500 font-bold">Again</span>
+              <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Again).text})</span>
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            
+            <Button 
+              variant="outline" 
+              className="flex flex-col h-auto py-3 border-orange-300 hover:bg-orange-50 hover:text-orange-600"
+              onClick={() => handleRate(2)}
+            >
+              <span className="text-orange-500 font-bold">Hard</span>
+              <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Hard).text})</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="flex flex-col h-auto py-3 border-green-300 hover:bg-green-50 hover:text-green-600"
+              onClick={() => handleRate(3)}
+            >
+              <span className="text-green-500 font-bold">Good</span>
+              <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Good).text})</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="flex flex-col h-auto py-3 border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+              onClick={() => handleRate(4)}
+            >
+              <span className="text-blue-500 font-bold">Easy</span>
+              <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Easy).text})</span>
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* FSRS Info */}
+      <div className="mt-6 px-4 py-3 bg-gray-50 rounded-lg text-sm text-gray-600">
+        <div className="flex items-start gap-2">
+          <Timer className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          <div>
+            <h4 className="font-medium">FSRS Spaced Repetition</h4>
+            <p className="text-xs mt-1">
+              This system uses AI to predict when you'll forget and schedules reviews at the optimal time.
+              The algorithm adapts to your learning habits to maximize memory retention with minimal reviews.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
-  );
+  )
 }
