@@ -24,8 +24,11 @@ export interface Word {
   confidence: number // 1-5
   learned: boolean // true if fully learned, false if still learning
   last_practiced?: string // ISO date string
+  lastUpdated?: string // ISO date string for when the word was last modified
   language: string
   userId?: number // Add userId to associate words with users
+  notes?: string // Additional notes about the word
+  imageUrl?: string // URL for an associated image
   
   // FSRS fields
   due?: string // Due date as ISO string
@@ -58,7 +61,16 @@ interface WordBankContextType {
   markAsLearned: (id: number) => Promise<{ success: boolean; message?: string }>
   unmarkAsLearned: (id: number) => Promise<{ success: boolean; message?: string }>
   deleteWord: (id: number) => Promise<{ success: boolean; message?: string }>
-  getWordStatus: (word: string) => { inBank: boolean; confidence: number; learned: boolean; meaning?: string } | null
+  getWordStatus: (word: string) => { 
+    inBank: boolean; 
+    confidence: number; 
+    learned: boolean; 
+    meaning?: string;
+    notes?: string;
+    imageUrl?: string;
+    exampleSentence?: string;
+    exampleSentenceTranslation?: string;
+  } | null
   scheduleReview: (id: number, quality: number) => void
   getWordsForReview: () => { today: Word[], tomorrow: Word[], later: Word[] }
 }
@@ -142,12 +154,17 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
         return { success: false, message: 'You must be logged in to add words' };
       }
       
+      // Keep only the notes and imageUrl debug logs
+      console.log('Adding word - notes:', wordData.notes);
+      console.log('Adding word - imageUrl:', wordData.imageUrl);
+      
       // Create a new word with a unique ID and user ID
       const newWord: Word = {
         ...wordData,
         id: Date.now(), // Simple ID generation for demo
         userId: user.id, // Associate with the current user
         last_practiced: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
       };
       
       if (newWord.learned) {
@@ -170,6 +187,10 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
         return { success: false, message: 'You must be logged in to update words' };
       }
 
+      // Keep only the notes and imageUrl debug logs
+      console.log('Updating word - notes:', updates.notes);
+      console.log('Updating word - imageUrl:', updates.imageUrl);
+
       // Find the original word in either list
       const originalWord = learningWords.find(w => w.id === id) || learnedWords.find(w => w.id === id);
       
@@ -178,7 +199,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
       }
       
       // Merge the original word with the updates
-      const updatedWord = { ...originalWord, ...updates };
+      const updatedWord = { ...originalWord, ...updates, lastUpdated: new Date().toISOString() };
       
       // Handle based on learned status
       if (updatedWord.learned) {
@@ -234,7 +255,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
       // If word exists, update it
       const word = learningWord || learnedWord;
       // Don't automatically mark as learned based on confidence level
-      const updatedWord = { ...word!, confidence };
+      const updatedWord = { ...word!, confidence, lastUpdated: new Date().toISOString() };
       
       // Update the word in the appropriate list without changing its learned status
       if (word!.learned) {
@@ -267,7 +288,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
       }
       
       // Update the word to be learned
-      const updatedWord = { ...word, learned: true, confidence: 5 };
+      const updatedWord = { ...word, learned: true, confidence: 5, lastUpdated: new Date().toISOString() };
       
       // Remove from learning words
       setLearningWords(prev => prev.filter(w => w.id !== id));
@@ -297,7 +318,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
       }
       
       // Update the word as not learned
-      const updatedWord = { ...word, learned: false, confidence: 4 }; // Default to confidence 4
+      const updatedWord = { ...word, learned: false, confidence: 4, lastUpdated: new Date().toISOString() }; // Default to confidence 4
       
       // Remove from learned words
       setLearnedWords(prev => prev.filter(w => w.id !== id));
@@ -316,6 +337,8 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
   const getWordStatus = (wordText: string) => {
     if (!wordText) return null;
     
+    // Remove excessive logs here
+    
     // Check learning words
     const learningWord = learningWords.find(w => w.word && w.word.toLowerCase() === wordText.toLowerCase());
     if (learningWord) {
@@ -323,7 +346,11 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
         inBank: true,
         confidence: learningWord.confidence,
         learned: false,
-        meaning: learningWord.meaning
+        meaning: learningWord.meaning,
+        notes: learningWord.notes,
+        imageUrl: learningWord.imageUrl,
+        exampleSentence: learningWord.exampleSentence,
+        exampleSentenceTranslation: learningWord.exampleSentenceTranslation
       };
     }
 
@@ -334,7 +361,11 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
         inBank: true,
         confidence: learnedWord.confidence,
         learned: true,
-        meaning: learnedWord.meaning
+        meaning: learnedWord.meaning,
+        notes: learnedWord.notes,
+        imageUrl: learnedWord.imageUrl,
+        exampleSentence: learnedWord.exampleSentence,
+        exampleSentenceTranslation: learnedWord.exampleSentenceTranslation
       };
     }
 
@@ -418,6 +449,7 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
         last_practiced: now.toISOString(),
         confidence: quality,
         learned: isLearned,
+        lastUpdated: new Date().toISOString(),
         
         // Append new history entry
         history: [...(word.history || []), historyEntry]
@@ -438,7 +470,8 @@ export function WordBankProvider({ children }: { children: ReactNode }) {
         last_practiced: now.toISOString(),
         interval: fallbackInterval,
         confidence: quality,
-        history: [...(word.history || []), { date: now.toISOString(), quality }]
+        history: [...(word.history || []), { date: now.toISOString(), quality }],
+        lastUpdated: new Date().toISOString(),
       };
       
       updateWord(id, updates);

@@ -25,6 +25,11 @@ export default function AddNewWordsMode({
   const [exampleSentence, setExampleSentence] = useState("")
   const [exampleSentenceTranslation, setExampleSentenceTranslation] = useState("")
   const [confidence, setConfidence] = useState(1)
+  
+  // Add state for notes and imageUrl
+  const [notes, setNotes] = useState("")
+  const [imageUrl, setImageUrl] = useState("")
+  
   const { addWord, updateWord, learningWords, learnedWords } = useWordBank()
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -48,6 +53,8 @@ export default function AddNewWordsMode({
         exampleSentence: exampleSentence,
         exampleSentenceTranslation: exampleSentenceTranslation,
         confidence: confidence,
+        notes: notes,
+        imageUrl: imageUrl,
       })
 
       // Reset form and editing state
@@ -60,6 +67,8 @@ export default function AddNewWordsMode({
         exampleSentence: exampleSentence,
         exampleSentenceTranslation: exampleSentenceTranslation,
         confidence: confidence,
+        notes: notes,
+        imageUrl: imageUrl,
         learned: false,
         language: "French",
       })
@@ -76,6 +85,8 @@ export default function AddNewWordsMode({
     setExampleSentence("")
     setExampleSentenceTranslation("")
     setConfidence(1)
+    setNotes("")
+    setImageUrl("")
     setEditingWordId(null)
     setState({ editingWordId: null })
   }
@@ -86,6 +97,8 @@ export default function AddNewWordsMode({
     setMeaning(word.meaning)
     setExampleSentence(word.exampleSentence || "")
     setExampleSentenceTranslation(word.exampleSentenceTranslation || "")
+    setNotes(word.notes || "")
+    setImageUrl(word.imageUrl || "")
     setConfidence(word.confidence)
     setEditingWordId(word.id)
     setState({ editingWordId: word.id })
@@ -209,6 +222,53 @@ export default function AddNewWordsMode({
                   onChange={(e) => setExampleSentenceTranslation(e.target.value)}
                   rows={2}
                 />
+              </div>
+              
+              {/* Add notes field */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="notes">Notes (optional)</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => handleGenerateAI("notes")}
+                  >
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    Generate with AI
+                  </Button>
+                </div>
+                <Textarea
+                  id="notes"
+                  placeholder="Add any additional notes about this word"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                />
+              </div>
+              
+              {/* Add image URL field */}
+              <div className="space-y-2">
+                <Label htmlFor="imageUrl">Image URL (optional)</Label>
+                <Input
+                  id="imageUrl"
+                  placeholder="URL for an image related to this word"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                />
+                {imageUrl && (
+                  <div className="mt-2 border rounded-md overflow-hidden">
+                    <img 
+                      src={imageUrl} 
+                      alt="Preview" 
+                      className="w-full h-auto max-h-32 object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Image+Error';
+                      }}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

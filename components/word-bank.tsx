@@ -37,12 +37,14 @@ export default function WordBank({
   const [editedMeaning, setEditedMeaning] = useState("")
   const [editedExampleSentence, setEditedExampleSentence] = useState("")
   const [editedExampleSentenceTranslation, setEditedExampleSentenceTranslation] = useState("")
+  const [editedNotes, setEditedNotes] = useState("")
+  const [editedImageUrl, setEditedImageUrl] = useState("")
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [filteredLearningWords, setFilteredLearningWords] = useState<Word[]>(learningWords)
   const [filteredLearnedWords, setFilteredLearnedWords] = useState<Word[]>(learnedWords)
   const [activeTab, setActiveTab] = useState(state.activeTab)
-  const [sortBy, setSortBy] = useState<string>(state.sortBy)
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(state.sortDirection)
+  const [sortBy, setSortBy] = useState(state.sortBy)
+  const [sortDirection, setSortDirection] = useState(state.sortDirection)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
 
@@ -67,6 +69,14 @@ export default function WordBank({
       case "length":
         sortedWords.sort((a, b) => {
           const comparison = a.word.length - b.word.length
+          return sortDirection === "asc" ? comparison : -comparison
+        })
+        break
+      case "lastUpdated":
+        sortedWords.sort((a, b) => {
+          const aDate = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0
+          const bDate = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0
+          const comparison = aDate - bDate
           return sortDirection === "asc" ? comparison : -comparison
         })
         break
@@ -143,6 +153,17 @@ export default function WordBank({
     const cardClass = isLearned 
       ? "bg-green-50 border-green-200 relative" 
       : `border-2 ${getConfidenceColor(word.confidence)} relative`;
+    
+    // Format the lastUpdated date if it exists
+    const formattedLastUpdated = word.lastUpdated 
+      ? new Date(word.lastUpdated).toLocaleDateString(undefined, { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      : 'Never updated';
       
     return (
       <Card key={cardKey} className={cardClass}>
@@ -153,13 +174,37 @@ export default function WordBank({
               {/* All badges and indicators removed as requested */}
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col flex-grow">
+          <CardContent className="pb-4 flex flex-col flex-grow">
             <div className="flex-grow">
               <p className="mb-2">{word.meaning}</p>
               {word.exampleSentence && <p className="text-sm italic mb-2">"{word.exampleSentence}"</p>}
               {word.exampleSentenceTranslation && (
                 <p className="text-sm mb-2">"{word.exampleSentenceTranslation}"</p>
               )}
+              
+              {/* Display notes if available */}
+              {word.notes && (
+                <div className="mt-3 p-2 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium mb-1">Notes:</p>
+                  <p className="text-sm">{word.notes}</p>
+                </div>
+              )}
+              
+              {/* Display image if available */}
+              {word.imageUrl && (
+                <div className="mt-3">
+                  <img 
+                    src={word.imageUrl} 
+                    alt={word.word} 
+                    className="rounded-lg w-full max-h-36 object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Image+Error';
+                    }}
+                  />
+                </div>
+              )}
+              
+              <p className="text-xs text-gray-500 mt-2">Last updated: {formattedLastUpdated}</p>
             </div>
             
             {/* Buttons positioned at the bottom */}
@@ -250,6 +295,8 @@ export default function WordBank({
     setEditedMeaning(word.meaning)
     setEditedExampleSentence(word.exampleSentence || "")
     setEditedExampleSentenceTranslation(word.exampleSentenceTranslation || "")
+    setEditedNotes(word.notes || "")
+    setEditedImageUrl(word.imageUrl || "")
     setIsEditDialogOpen(true)
   }
 
@@ -259,6 +306,8 @@ export default function WordBank({
         meaning: editedMeaning,
         exampleSentence: editedExampleSentence,
         exampleSentenceTranslation: editedExampleSentenceTranslation,
+        notes: editedNotes,
+        imageUrl: editedImageUrl,
       })
       setIsEditDialogOpen(false)
       setEditingWord(null)
@@ -362,6 +411,7 @@ export default function WordBank({
                   <SelectItem value="alphabetical">Alphabetical</SelectItem>
                   <SelectItem value="confidence">Confidence Level</SelectItem>
                   <SelectItem value="length">Word Length</SelectItem>
+                  <SelectItem value="lastUpdated">Last Updated</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -483,6 +533,48 @@ export default function WordBank({
                 className="col-span-3"
                 rows={2}
               />
+            </div>
+            
+            {/* Add notes field */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="notes" className="text-right">
+                Notes
+              </Label>
+              <Textarea
+                id="notes"
+                value={editedNotes}
+                onChange={(e) => setEditedNotes(e.target.value)}
+                className="col-span-3"
+                rows={2}
+                placeholder="Additional notes about this word"
+              />
+            </div>
+            
+            {/* Add image URL field */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="imageUrl" className="text-right">
+                Image URL
+              </Label>
+              <div className="col-span-3 space-y-2">
+                <Input
+                  id="imageUrl"
+                  value={editedImageUrl}
+                  onChange={(e) => setEditedImageUrl(e.target.value)}
+                  placeholder="URL for an image related to this word"
+                />
+                {editedImageUrl && (
+                  <div className="mt-2 border rounded-md overflow-hidden">
+                    <img 
+                      src={editedImageUrl} 
+                      alt="Preview" 
+                      className="w-full h-auto max-h-32 object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Image+Error';
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <DialogFooter>

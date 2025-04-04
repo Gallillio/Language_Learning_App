@@ -402,7 +402,7 @@ export default function FlashCardsMode() {
           {/* Back of card */}
                     <div
             className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col 
-              ${isFlipped ? 'opacity-100' : 'opacity-0'} bg-gradient-to-br from-purple-500 to-pink-600 text-white shadow-xl`}
+              ${isFlipped ? 'opacity-100' : 'opacity-0'} bg-gradient-to-br from-purple-500 to-pink-600 text-white shadow-xl overflow-y-auto`}
                       style={{ transform: "rotateY(180deg)" }}
                     >
             <div className="flex justify-between mb-4">
@@ -430,6 +430,28 @@ export default function FlashCardsMode() {
                           )}
                         </div>
                       )}
+
+              {/* Display notes if available */}
+              {currentCard?.notes && (
+                <div className="mt-4 p-3 bg-white/10 rounded-lg w-full">
+                  <h4 className="text-sm font-semibold text-white/90 mb-1">Notes:</h4>
+                  <p className="text-sm">{currentCard.notes}</p>
+                </div>
+              )}
+              
+              {/* Display image if available */}
+              {currentCard?.imageUrl && (
+                <div className="mt-4 w-full max-w-[250px]">
+                  <img 
+                    src={currentCard.imageUrl} 
+                    alt={currentCard.word} 
+                    className="rounded-lg w-full h-auto object-cover shadow-md" 
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Image+Error';
+                    }}
+                  />
+                </div>
+              )}
             </div>
 
             <p className="text-center text-white/70 text-sm mt-8">Tap to return to question</p>
@@ -496,8 +518,8 @@ export default function FlashCardsMode() {
               This system uses AI to predict when you'll forget and schedules reviews at the optimal time.
               The algorithm adapts to your learning habits to maximize memory retention with minimal reviews.
             </p>
-          </div>
-        </div>
+                      </div>
+                    </div>
       </div>
     </div>
   )
