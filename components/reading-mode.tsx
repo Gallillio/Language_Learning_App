@@ -827,6 +827,39 @@ function WordSidebar({
     alert(`AI would generate content for the ${field} field here.`)
   }
 
+  // Add keyboard shortcut support for the sidebar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle keyboard shortcuts when sidebar is open
+      if (!sidebarRef.current) return;
+      
+      // Ignore if user is typing in an input field
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      
+      // Process number keys 1-5 for confidence levels
+      if (e.key >= '1' && e.key <= '5') {
+        e.preventDefault();
+        const confidenceLevel = parseInt(e.key);
+        handleConfidenceChange(confidenceLevel);
+      }
+      
+      // Process 'i' key for marking as learned/mastered (toggle)
+      if (e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        if (isLearned) {
+          handleUnmarkAsLearned();
+        } else {
+          handleMarkAsLearned();
+        }
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isLearned, handleConfidenceChange, handleMarkAsLearned, handleUnmarkAsLearned]);
+
   // In the WordSidebar component, update handleSidebarUpdate function
   const handleSidebarUpdate = useCallback(() => {
     // Perform a more robust refresh to ensure UI updates
@@ -1040,7 +1073,10 @@ function WordSidebar({
             <DialogDescription>You have unsaved changes. Do you want to save them before closing?</DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2 sm:justify-end">
-            <Button variant="outline" onClick={handleCloseClick}>
+            <Button variant="outline" onClick={() => {
+              setShowWarning(false);
+              handleClose();
+            }}>
               Discard Changes
             </Button>
             <Button onClick={saveAndClose}>Save Changes</Button>
@@ -1576,6 +1612,9 @@ export default function ReadingMode({
     }
   }, [selectedWordSpans, learningWords, learnedWords, sidebarJustClosed, selectedWord, setSelectedWordData, setSelectedWord, setSidebarOpen])
 
+  // Add a state to track which word was affected by keyboard shortcuts
+  const [lastShortcutWord, setLastShortcutWord] = useState<string | null>(null);
+
   // Add keyboard shortcut handler for the currently hovered word
   useEffect(() => {
     // Only process if a story is selected
@@ -1594,15 +1633,34 @@ export default function ReadingMode({
       if (e.key >= '1' && e.key <= '5') {
         const confidenceLevel = parseInt(e.key);
         
+        // Track which word this shortcut affects
+        setLastShortcutWord(word);
+        
         if (foundWord) {
           // Update existing word's confidence directly
           if (foundWord.id) {
-            // Update confidence in the wordbank
-            updateConfidence(foundWord.id, confidenceLevel);
-            // Set temporary confidence to show the change
-            setTempConfidence(confidenceLevel);
-            // Force refresh to show the change
-            forceRefresh();
+            // If word is currently mastered, unmark it first
+            if (foundWord.learned) {
+              console.log('Unmastering word before setting confidence:', word);
+              unmarkAsLearned(foundWord.id);
+              
+              // Need a small delay to ensure unmark completes before setting confidence
+              setTimeout(() => {
+                updateConfidence(foundWord.id, confidenceLevel);
+                // Set temporary states to show the changes
+                setTempLearned(false);
+                setTempConfidence(confidenceLevel);
+                // Force refresh to show the change
+                forceRefresh();
+              }, 50);
+            } else {
+              // Word is not mastered, just update confidence
+              updateConfidence(foundWord.id, confidenceLevel);
+              // Set temporary states to show the change
+              setTempConfidence(confidenceLevel);
+              // Force refresh to show the change
+              forceRefresh();
+            }
           }
         } else {
           // New word - open sidebar with preset confidence
@@ -1623,15 +1681,35 @@ export default function ReadingMode({
         }
       }
       
-      // Process 'i' key for marking as learned/mastered
+      // Process 'i' key for marking as learned/mastered (toggle behavior)
       if (e.key.toLowerCase() === 'i') {
+        // Track which word this shortcut affects
+        setLastShortcutWord(word);
+        
         if (foundWord && foundWord.id) {
-          // Mark existing word as learned
-          markAsLearned(foundWord.id);
-          setTempLearned(true);
+          // Toggle learned status
+          if (foundWord.learned) {
+            // If already learned, unmark it
+            console.log('Unmarking word as learned:', word);
+            unmarkAsLearned(foundWord.id);
+            setTempLearned(false);
+          } else {
+            // If not learned, mark it
+            console.log('Marking word as learned:', word);
+            markAsLearned(foundWord.id);
+            setTempLearned(true);
+          }
           forceRefresh();
+          
+          // Show a toast notification
+          toast({
+            title: foundWord.learned ? "Word Unmastered" : "Word Mastered",
+            description: `"${word}" was ${foundWord.learned ? "removed from" : "added to"} your mastered words.`,
+            duration: 2000,
+          });
         } else {
           // New word - add directly to word bank as mastered without opening sidebar
+          console.log('Adding new word as mastered:', word);
           addWord({
             word: word,
             meaning: "", // Empty meaning is allowed for mastered words
@@ -1660,7 +1738,7 @@ export default function ReadingMode({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [hoveredWord, isEditingMultiSelect, selectedWord, learningWords, learnedWords, updateConfidence, markAsLearned, forceRefresh, selectedStory]);
+  }, [hoveredWord, isEditingMultiSelect, selectedWord, learningWords, learnedWords, updateConfidence, markAsLearned, unmarkAsLearned, forceRefresh, selectedStory, toast]);
 
   // Define handleWordClick and other functions before they're used
   const handleWordClick = useCallback((e: React.MouseEvent, word: string) => {
@@ -1677,6 +1755,13 @@ export default function ReadingMode({
     
     // Don't do anything if clicking the same word
     if (selectedWord === clickedWord && sidebarOpen) return;
+    
+    // Reset temporary states when clicking on a new word
+    // This prevents shortcuts from one word affecting another
+    setTempConfidence(null);
+    setTempLearned(null);
+    setMeaningInputHighlight('none');
+    setLastShortcutWord(null); // Clear the last shortcut word
     
     // If sidebar is open and there are unsaved changes, show warning
     if (sidebarOpen && selectedWord) {
@@ -1725,7 +1810,7 @@ export default function ReadingMode({
     
     setSelectedWord(clickedWord);
     setSidebarOpen(true);
-  }, [isEditingMultiSelect, showWordChangeConfirmation, selectedWord, sidebarOpen, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord, setShowWordChangeConfirmation]);
+  }, [isEditingMultiSelect, showWordChangeConfirmation, selectedWord, sidebarOpen, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord, setShowWordChangeConfirmation, setTempConfidence, setTempLearned, setMeaningInputHighlight, setLastShortcutWord]);
 
   function handleWordHover(word: string) {
     setHoveredWord(word)
@@ -1819,8 +1904,10 @@ export default function ReadingMode({
           // Check if there are temporary changes for this phrase
           const isPhraseSelected = selectedWord === phrase
           const hasTempChanges = isPhraseSelected && (tempConfidence !== null || tempLearned !== null)
+          // Only apply temp changes if this was the word the shortcut was used on
+          const shouldApplyTempChanges = hasTempChanges || (phrase === lastShortcutWord && (tempConfidence !== null || tempLearned !== null))
 
-          if (hasTempChanges) {
+          if (shouldApplyTempChanges) {
             // Use temporary states for the selected phrase
             const isCurrentlyLearned = tempLearned !== null ? tempLearned : status.learned || false
             const currentConfidence = tempConfidence !== null ? tempConfidence : status.confidence || 1
@@ -1888,8 +1975,10 @@ export default function ReadingMode({
           // Check if this is the currently selected word with temporary changes
           const isSelectedWord = selectedWord === cleanToken
           const hasTempChanges = isSelectedWord && (tempConfidence !== null || tempLearned !== null)
+          // Only apply temp changes if this was the word the shortcut was used on
+          const shouldApplyTempChanges = hasTempChanges || (cleanToken === lastShortcutWord && (tempConfidence !== null || tempLearned !== null))
 
-          if (hasTempChanges) {
+          if (shouldApplyTempChanges) {
             // Use temporary states for the selected word
             const isCurrentlyLearned = tempLearned !== null ? tempLearned : status?.learned || false
             const currentConfidence = tempConfidence !== null ? tempConfidence : status?.confidence || 1
@@ -1996,7 +2085,8 @@ export default function ReadingMode({
       handleWordHover,
       handleWordHoverLeave,
       handleWordSpanMouseDown,
-      handleWordSpanMouseEnter
+      handleWordSpanMouseEnter,
+      lastShortcutWord
     ],
   )
 
@@ -2037,6 +2127,12 @@ export default function ReadingMode({
   const handleDiscardAndSwitchWord = useCallback(() => {
     // First close the confirmation dialog
     setShowWordChangeConfirmation(false);
+    
+    // Reset temporary states to prevent shortcuts from affecting the new word
+    setTempConfidence(null);
+    setTempLearned(null);
+    setMeaningInputHighlight('none');
+    setLastShortcutWord(null); // Clear the last shortcut word
     
     if (tempSelectedWord) {
       // Immediately close any current sidebar
@@ -2085,7 +2181,7 @@ export default function ReadingMode({
         setTempSelectedWord(null);
       }, 100);
     }
-  }, [tempSelectedWord, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord]);
+  }, [tempSelectedWord, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord, setTempConfidence, setTempLearned, setMeaningInputHighlight]);
 
   const handleSaveAndSwitchWord = useCallback(() => {
     // First close the confirmation dialog
@@ -2102,6 +2198,11 @@ export default function ReadingMode({
       // Close the current sidebar
       setSelectedWord(null);
       setSidebarOpen(false);
+      
+      // Reset temporary states to prevent shortcuts from affecting the new word
+      setTempConfidence(null);
+      setTempLearned(null);
+      setMeaningInputHighlight('none');
       
       // Short delay before opening the new sidebar
       setTimeout(() => {
@@ -2147,7 +2248,7 @@ export default function ReadingMode({
         }
       }, 100);
     }, 300); // A longer wait to ensure the save completes
-  }, [tempSelectedWord, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord, setTriggerSave]);
+  }, [tempSelectedWord, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord, setTriggerSave, setTempConfidence, setTempLearned, setMeaningInputHighlight]);
 
   // Add effect to toggle class on body when word change confirmation is shown
   useEffect(() => {
@@ -2162,6 +2263,18 @@ export default function ReadingMode({
       document.body.classList.remove('word-change-confirmation-open');
     };
   }, [showWordChangeConfirmation]);
+
+  // Add a new handler for the X button in the word change confirmation dialog
+  const handleCancelWordChange = useCallback(() => {
+    // Close the confirmation dialog
+    setShowWordChangeConfirmation(false);
+    
+    // Clear the temporary selected word
+    setTempSelectedWord(null);
+    
+    // Keep the original sidebar open
+    // (We don't need to do anything else since we're just canceling the operation)
+  }, [setShowWordChangeConfirmation, setTempSelectedWord]);
 
   if (selectedStory) {
     return (
@@ -2275,9 +2388,10 @@ export default function ReadingMode({
         <Dialog 
           open={showWordChangeConfirmation} 
           onOpenChange={(open) => {
-            // Only allow the buttons to close the dialog, not clicking outside
+            // If dialog is closing via X button, call the cancel handler
             if (open === false) {
-              return false; // Prevent auto-closing
+              handleCancelWordChange();
+              return;
             }
             setShowWordChangeConfirmation(open);
           }}
