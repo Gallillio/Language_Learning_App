@@ -17,9 +17,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   CheckCircle2,
-  Timer,
-  Settings as SettingsIcon,
-  X
+  Timer
 } from "lucide-react"
 import {
   Dialog,
@@ -27,13 +25,8 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
-  DialogTrigger
+  DialogTitle
 } from "@/components/ui/dialog"
-import { Slider } from "@/components/ui/slider"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
 
 export default function FlashCardsMode() {
   // State for cards and UI
@@ -61,76 +54,18 @@ export default function FlashCardsMode() {
   // Initialize FSRS for predictions
   const fsrs = new FSRS()
   
-  // Add settings state
-  const [showSettings, setShowSettings] = useState(false)
-  const [newCardsLimit, setNewCardsLimit] = useState(20)
-  const [limitEnabled, setLimitEnabled] = useState(false)
-  
-  // Load settings from localStorage on component mount
+  // Load cards
   useEffect(() => {
-    const savedSettings = localStorage.getItem('flashcard-settings')
-    if (savedSettings) {
-      try {
-        const settings = JSON.parse(savedSettings)
-        if (settings.newCardsLimit) setNewCardsLimit(settings.newCardsLimit)
-        if (settings.limitEnabled !== undefined) setLimitEnabled(settings.limitEnabled)
-      } catch (error) {
-        console.error('Error loading settings:', error)
-      }
-    }
-  }, [])
-  
-  // Save settings to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('flashcard-settings', JSON.stringify({
-      newCardsLimit,
-      limitEnabled
-    }))
-  }, [newCardsLimit, limitEnabled])
-  
-  // Load cards with limit applied
-  useEffect(() => {
-    const allWords = getWordsForReview().today
-    
-    // Apply new cards limit if enabled
-    let filteredWords = [...allWords]
-    if (limitEnabled) {
-      // Separate new cards from review cards
-      // New cards have state 0, or uninitialized state
-      const newCards = allWords.filter(word => {
-        // Ensure we properly identify new cards - they have state 0 or null/undefined state
-        return word.state === 0 || word.state === undefined || word.state === null;
-      });
-      
-      // All other cards are review cards that should always be shown
-      const reviewCards = allWords.filter(word => {
-        return word.state !== 0 && word.state !== undefined && word.state !== null;
-      });
-      
-      console.log(`Found ${newCards.length} new cards and ${reviewCards.length} review cards`);
-      
-      // Limit new cards
-      const limitedNewCards = newCards.slice(0, newCardsLimit);
-      
-      // Combine review cards with limited new cards
-      filteredWords = [...reviewCards, ...limitedNewCards];
-      
-      console.log(`Applied limit: Showing ${limitedNewCards.length}/${newCards.length} new cards`);
-    }
-    
-    // Shuffle the cards to make the order less predictable
-    const shuffledWords = [...filteredWords].sort(() => Math.random() - 0.5);
-    
-    setCardStack(shuffledWords);
-    setTotalCards(shuffledWords.length);
-    
-    // Clean up timer on unmount
+    const words = getWordsForReview().today
+    setCardStack(words)
+    setTotalCards(words.length)
     return () => {
+      // Clean up timer on unmount
       if (timerRef.current) {
-        clearInterval(timerRef.current);
+        clearInterval(timerRef.current)
       }
-    };
-  }, [getWordsForReview, limitEnabled, newCardsLimit])
+    }
+  }, [getWordsForReview])
 
   // Set up interval to check for pending reviews
   useEffect(() => {
@@ -165,7 +100,7 @@ export default function FlashCardsMode() {
     if (cardStack.length === 0) return
     setIsFlipped(!isFlipped)
   }
-  
+
   // Get the current card
   const currentCard = cardStack[currentIndex]
   
@@ -276,7 +211,7 @@ export default function FlashCardsMode() {
     setCardStack(updatedStack)
     
     // Reset flip state
-    setIsFlipped(false)
+      setIsFlipped(false)
     
     // Move to the next card or end session if done
     if (updatedStack.length > 0) {
@@ -411,86 +346,7 @@ export default function FlashCardsMode() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-4 relative">
-      {/* Settings button */}
-      <div className="absolute top-0 right-0">
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              aria-label="Settings"
-            >
-              <SettingsIcon className="h-5 w-5" />
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>Flashcard Settings</DialogTitle>
-              <DialogDescription>
-                Customize your learning experience
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="space-y-6 py-4">
-              {/* New Cards Limit */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <h3 className="text-base font-medium">Limit New Cards</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Restrict how many new cards you want to learn in this session
-                    </p>
-                  </div>
-                  <Switch 
-                    checked={limitEnabled}
-                    onCheckedChange={setLimitEnabled}
-                  />
-                </div>
-                
-                {limitEnabled && (
-                  <div className="space-y-3 pt-2">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min={1}
-                        max={100}
-                        value={newCardsLimit}
-                        onChange={(e) => setNewCardsLimit(parseInt(e.target.value) || 20)}
-                        className="w-20"
-                      />
-                      <Label>New cards</Label>
-                    </div>
-                    
-                    <Slider
-                      value={[newCardsLimit]}
-                      min={1}
-                      max={50}
-                      step={1}
-                      onValueChange={(vals) => setNewCardsLimit(vals[0])}
-                      className="py-2"
-                    />
-                    
-                    <p className="text-xs text-muted-foreground pt-1">
-                      You will still see all your review cards, but only up to {newCardsLimit} new cards.
-                    </p>
-                  </div>
-                )}
-              </div>
-              
-              {/* Could add more settings here */}
-            </div>
-            
-            <DialogFooter>
-              <Button variant="outline" onClick={() => window.location.reload()}>
-                Apply Changes
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-      
+    <div className="max-w-2xl mx-auto p-4">
       {/* Progress bar */}
       <div className="mb-4 flex items-center gap-2">
         <Progress value={(reviewedCount / (totalCards + pendingReviews.length)) * 100} className="h-2" />
@@ -501,19 +357,19 @@ export default function FlashCardsMode() {
         {pendingReviews.length > 0 && (
           <span className="text-xs text-blue-500 ml-2">
             + {pendingReviews.length} pending
-          </span>
+                    </span>
         )}
-      </div>
-      
+                  </div>
+
       {/* Card */}
       <div className="perspective-1000 my-8 h-[400px]">
-        <motion.div
+                  <motion.div
           className="w-full h-full cursor-pointer relative"
-          onClick={handleFlip}
-          animate={{ rotateY: isFlipped ? 180 : 0 }}
+                    onClick={handleFlip}
+                    animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.5 }}
-          style={{ transformStyle: "preserve-3d" }}
-        >
+                    style={{ transformStyle: "preserve-3d" }}
+                  >
           {/* Front of card */}
           <div 
             className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col 
@@ -527,8 +383,8 @@ export default function FlashCardsMode() {
               <div className="text-xs flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 <span>Rep #{currentCard?.reps || 0}</span>
-              </div>
-            </div>
+                        </div>
+                      </div>
             
             <div className="flex-grow flex flex-col items-center justify-center">
               <h2 className="text-4xl font-bold mb-8 text-center">{currentCard?.word}</h2>
@@ -536,19 +392,19 @@ export default function FlashCardsMode() {
               {currentCard?.exampleSentence && (
                 <p className="text-lg italic mb-4 text-center max-w-md">
                   "{currentCard.exampleSentence}"
-                </p>
-              )}
+                        </p>
+                      )}
             </div>
-            
+
             <p className="text-center text-white/70 text-sm mt-8">Tap to reveal meaning</p>
-          </div>
-          
+                    </div>
+
           {/* Back of card */}
-          <div 
+                    <div
             className={`absolute w-full h-full backface-hidden rounded-xl p-8 flex flex-col 
               ${isFlipped ? 'opacity-100' : 'opacity-0'} bg-gradient-to-br from-purple-500 to-pink-600 text-white shadow-xl`}
-            style={{ transform: "rotateY(180deg)" }}
-          >
+                      style={{ transform: "rotateY(180deg)" }}
+                    >
             <div className="flex justify-between mb-4">
               <div className="text-xs flex items-center gap-1">
                 <BarChart4 className="h-3 w-3" />
@@ -559,8 +415,8 @@ export default function FlashCardsMode() {
                 <span>State: {currentCard?.state === 0 ? 'New' : 
                   currentCard?.state === 1 ? 'Learning' : 
                   currentCard?.state === 2 ? 'Review' : 'Relearning'}</span>
-              </div>
-            </div>
+                        </div>
+                      </div>
             
             <div className="flex-grow flex flex-col items-center justify-center">
               <h3 className="text-xl font-medium mb-2 text-white/80">{currentCard?.word}</h3>
@@ -571,16 +427,16 @@ export default function FlashCardsMode() {
                   <p className="text-lg italic">{currentCard.exampleSentence}</p>
                   {currentCard?.exampleSentenceTranslation && (
                     <p className="text-base mt-1">{currentCard.exampleSentenceTranslation}</p>
-                  )}
-                </div>
-              )}
+                          )}
+                        </div>
+                      )}
             </div>
-            
+
             <p className="text-center text-white/70 text-sm mt-8">Tap to return to question</p>
-          </div>
-        </motion.div>
-      </div>
-      
+                    </div>
+                  </motion.div>
+                </div>
+
       {/* Rating buttons */}
       <AnimatePresence>
         {isFlipped && (
@@ -600,23 +456,23 @@ export default function FlashCardsMode() {
               <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Again).text})</span>
             </Button>
             
-            <Button 
-              variant="outline" 
+                  <Button
+                    variant="outline"
               className="flex flex-col h-auto py-3 border-orange-300 hover:bg-orange-50 hover:text-orange-600"
               onClick={() => handleRate(2)}
-            >
+                  >
               <span className="text-orange-500 font-bold">Hard</span>
               <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Hard).text})</span>
-            </Button>
-            
-            <Button 
-              variant="outline" 
+                  </Button>
+
+                  <Button
+                    variant="outline"
               className="flex flex-col h-auto py-3 border-green-300 hover:bg-green-50 hover:text-green-600"
               onClick={() => handleRate(3)}
-            >
+                  >
               <span className="text-green-500 font-bold">Good</span>
               <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Good).text})</span>
-            </Button>
+                  </Button>
             
             <Button 
               variant="outline" 
@@ -625,7 +481,7 @@ export default function FlashCardsMode() {
             >
               <span className="text-blue-500 font-bold">Easy</span>
               <span className="text-xs mt-1 text-gray-500">({getPredictedInterval(Rating.Easy).text})</span>
-            </Button>
+                      </Button>
           </motion.div>
         )}
       </AnimatePresence>

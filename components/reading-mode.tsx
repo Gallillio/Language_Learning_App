@@ -198,6 +198,7 @@ interface WordSidebarProps {
     exampleSentence?: string
     exampleSentenceTranslation?: string
   } | null>>
+  triggerSave?: boolean
 }
 
 function WordSidebar({
@@ -212,8 +213,9 @@ function WordSidebar({
   meaningInputHighlight,
   setMeaningInputHighlight,
   setSelectedWordData,
+  triggerSave = false,
 }: WordSidebarProps) {
-  const { addWord, updateWord, markAsLearned, unmarkAsLearned, deleteWord } = useWordBank()
+  const { addWord, updateWord, markAsLearned, unmarkAsLearned, deleteWord, learningWords, learnedWords } = useWordBank()
   const [meaning, setMeaning] = useState(existingWordData?.meaning || "")
   const [exampleSentence, setExampleSentence] = useState(existingWordData?.exampleSentence || "")
   const [exampleSentenceTranslation, setExampleSentenceTranslation] = useState(
@@ -232,6 +234,292 @@ function WordSidebar({
   // Add state for delete confirmation
   const [showDeleteWarning, setShowDeleteWarning] = useState(false)
 
+  // Define saveChanges with useCallback
+  const saveChanges = useCallback(() => {
+    // Special case: If user is marking a word as mastered (learned),
+    // we don't require a meaning to be provided
+    const isMarkedAsLearned = isLearned && tempLearned !== false;
+    
+    // Check if meaning is required but not provided
+    if (!isMarkedAsLearned && !meaning.trim()) {
+      setShowMeaningWarning(true);
+      setMeaningInputHighlight?.('red');
+      return;
+    }
+
+    // Log the current form state for debugging
+    console.log('Saving word with current form data:', {
+      id: existingWordData?.id,
+      word: word,
+      meaning: meaning,
+      exampleSentence: exampleSentence,
+      exampleSentenceTranslation: exampleSentenceTranslation,
+      confidence: confidence,
+      learned: isLearned
+    });
+
+    if (existingWordData) {
+      // Make sure ID is not null before using it
+      if (existingWordData.id !== null && existingWordData.id !== -1) {
+        // Update existing word with all fields
+        const updatedData = {
+          meaning,
+          exampleSentence,
+          exampleSentenceTranslation,
+          confidence,
+        };
+        
+        // Log the update operation to debug
+        console.log('Updating word with ID', existingWordData.id, updatedData);
+        
+        updateWord(existingWordData.id, updatedData);
+
+        // If the learned status changed, handle that separately
+        if (isLearned !== existingWordData.learned) {
+          if (isLearned) {
+            markAsLearned(existingWordData.id)
+          } else {
+            unmarkAsLearned(existingWordData.id)
+          }
+        }
+        
+        // Update the existingWordData to reflect the new values to prevent detecting changes 
+        // after save (which would leave isChanged as true)
+        const newExistingWordData = {
+          ...existingWordData,
+          meaning,
+          exampleSentence,
+          exampleSentenceTranslation,
+          confidence,
+          learned: isLearned
+        };
+        
+        // Update parent component state with the updated data
+        setSelectedWordData(newExistingWordData);
+        
+        // Force refresh to ensure changes are reflected immediately
+        onUpdate();
+      } else if (existingWordData.id === -1) {
+        // This is a word that was just added with a temporary ID
+        // We need to find the real word in the word bank
+        console.log('Handling word with temporary ID, searching for real ID');
+        
+        // Only proceed if we have an actual meaning or the word is marked as learned
+        if (meaning.trim() || isLearned) {
+          setTimeout(() => {
+            // After editing the word with temp ID, find it in the word bank
+            const wordInBank = isLearned 
+              ? learnedWords.find((w: { word: string }) => w.word === word)
+              : learningWords.find((w: { word: string }) => w.word === word);
+            
+            if (wordInBank) {
+              console.log('Found word in bank with real ID:', wordInBank.id);
+              
+              // Now update the word with the current form values
+              const updatedData = {
+                meaning,
+                exampleSentence,
+                exampleSentenceTranslation,
+                confidence,
+              };
+              
+              updateWord(wordInBank.id, updatedData);
+              
+              // Handle learned status
+              if (isLearned !== wordInBank.learned) {
+                if (isLearned) {
+                  markAsLearned(wordInBank.id);
+                } else {
+                  unmarkAsLearned(wordInBank.id);
+                }
+              }
+              
+              // Create a new object to update the state with the real ID and current form values
+              const newExistingWordData = {
+                id: wordInBank.id,
+                word: word,
+                meaning: meaning,
+                confidence: confidence,
+                learned: isLearned,
+                exampleSentence: exampleSentence,
+                exampleSentenceTranslation: exampleSentenceTranslation,
+              };
+              
+              // Update parent component state with the real ID and current form values
+              setSelectedWordData(newExistingWordData);
+              
+              // Force a UI refresh
+              onUpdate();
+            } else {
+              console.warn('Could not find word in bank after adding it');
+            }
+          }, 100);
+        }
+      } else {
+        // If ID is null, treat it as a new word with the same word text
+        console.log('Adding new word', word);
+        
+        // Only add word if it has a meaning or is marked as learned
+        if (meaning.trim() || isLearned) {
+          // Add the word and then update the parent's state with the newly created word ID
+          const wordToAdd = {
+            word,
+            meaning,
+            exampleSentence,
+            exampleSentenceTranslation,
+            confidence,
+            learned: isLearned,
+            language: "French",
+          };
+          
+          // First, indicate we're saving
+          setIsChanged(false);
+          
+          // Create a completely new object to ensure React detects the change
+          const temporaryWord = {
+            id: -1, // Temporary ID that will be replaced with real ID soon
+            word: word,
+            meaning: meaning,
+            confidence: confidence,
+            learned: isLearned,
+            exampleSentence: exampleSentence,
+            exampleSentenceTranslation: exampleSentenceTranslation,
+          };
+          
+          // Update parent component state with the SAME data that's in the form,
+          // but with a temporary ID to show edit mode
+          setSelectedWordData(temporaryWord);
+          
+          // Force an update to show the Edit UI immediately
+          onUpdate();
+          
+          addWord(wordToAdd).then(result => {
+            if (result.success) {
+              // Force a refresh to ensure word bank is updated
+              onUpdate();
+              
+              // Immediately find the newly added word
+              setTimeout(() => {
+                // After successfully adding the word, find it in the word bank
+                const newlyAddedWord = isLearned 
+                  ? learnedWords.find((w: { word: string }) => w.word === word)
+                  : learningWords.find((w: { word: string }) => w.word === word);
+                
+                if (newlyAddedWord) {
+                  console.log('Found newly added word:', newlyAddedWord);
+                  
+                  // Create a new object to update the state with the real ID
+                  const newExistingWordData = {
+                    id: newlyAddedWord.id,
+                    word: word,
+                    meaning: meaning,
+                    confidence: confidence,
+                    learned: isLearned,
+                    exampleSentence: exampleSentence,
+                    exampleSentenceTranslation: exampleSentenceTranslation,
+                  };
+                  
+                  // Update parent component state with a COMPLETELY NEW OBJECT
+                  // to ensure React detects the change
+                  setSelectedWordData(newExistingWordData);
+                  
+                  // Force a UI refresh
+                  onUpdate();
+                }
+              }, 100);
+            }
+          });
+        } else {
+          setShowMeaningWarning(true);
+          setMeaningInputHighlight?.('red');
+          return;
+        }
+      }
+    } else {
+      // Only add new word if meaning is provided or word is marked as learned
+      if (meaning.trim() || isLearned) {
+        console.log('Adding brand new word', word);
+        
+        // Add the word and then update the parent's state with the newly created word ID
+        const wordToAdd = {
+          word,
+          meaning,
+          exampleSentence,
+          exampleSentenceTranslation,
+          confidence,
+          learned: isLearned,
+          language: "French",
+        };
+        
+        // First, indicate we're saving
+        setIsChanged(false);
+        
+        // Create a temporary placeholder object to immediately update the UI
+        const temporaryWord = {
+          id: -1, // Temporary ID that will be replaced with real ID soon
+          word: word,
+          meaning: meaning,
+          confidence: confidence,
+          learned: isLearned,
+          exampleSentence: exampleSentence,
+          exampleSentenceTranslation: exampleSentenceTranslation,
+        };
+        
+        // Update parent component state with temporary data
+        setSelectedWordData(temporaryWord);
+        
+        // Force an update to show the Edit UI immediately
+        onUpdate();
+        
+        addWord(wordToAdd).then(result => {
+          if (result.success) {
+            // Force a refresh to ensure word bank is updated
+            onUpdate();
+            
+            // Immediately find the newly added word
+            setTimeout(() => {
+              // After successfully adding the word, find it in the word bank
+              const newlyAddedWord = isLearned 
+                ? learnedWords.find((w: { word: string }) => w.word === word)
+                : learningWords.find((w: { word: string }) => w.word === word);
+              
+              if (newlyAddedWord) {
+                console.log('Found newly added word:', newlyAddedWord);
+                
+                // Create a new object to update the state
+                const newExistingWordData = {
+                  id: newlyAddedWord.id,
+                  word: word,
+                  meaning: meaning,
+                  confidence: confidence,
+                  learned: isLearned,
+                  exampleSentence: exampleSentence,
+                  exampleSentenceTranslation: exampleSentenceTranslation,
+                };
+                
+                // Update parent component state
+                setSelectedWordData(newExistingWordData);
+                
+                // Force a UI refresh
+                onUpdate();
+              }
+            }, 100);
+          }
+        });
+      } else {
+        setShowMeaningWarning(true);
+        setMeaningInputHighlight?.('red');
+        return;
+      }
+    }
+
+    // Clear temporary states
+    setMeaningInputHighlight?.('none');
+    setTempConfidence(null);
+    setTempLearned(null);
+    setIsChanged(false);
+  }, [meaning, exampleSentence, exampleSentenceTranslation, confidence, isLearned, existingWordData, word, tempLearned, setMeaningInputHighlight, setTempConfidence, setTempLearned, onUpdate, addWord, updateWord, markAsLearned, unmarkAsLearned, setSelectedWordData, learningWords, learnedWords]);
+
   // Update hasValidMeaning when meaning changes
   useEffect(() => {
     setHasValidMeaning(!!meaning.trim())
@@ -247,6 +535,7 @@ function WordSidebar({
 
   // Update state when existingWordData changes
   useEffect(() => {
+    console.log('existingWordData updated:', existingWordData);
     setMeaning(existingWordData?.meaning || "")
     setExampleSentence(existingWordData?.exampleSentence || "")
     setExampleSentenceTranslation(existingWordData?.exampleSentenceTranslation || "")
@@ -283,6 +572,12 @@ function WordSidebar({
         return;
       }
       
+      // Check if word change confirmation is showing (through a data attribute on body or a similar approach)
+      const isWordChangeConfirmationOpen = document.body.classList.contains('word-change-confirmation-open');
+      if (isWordChangeConfirmationOpen) {
+        return;
+      }
+      
       if (sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
         if (isChanged && hasValidMeaning) {
           setShowWarning(true)
@@ -300,16 +595,49 @@ function WordSidebar({
 
   // Track changes to form fields
   useEffect(() => {
-    if (
+    const originalLearned = existingWordData?.learned || false;
+    const formChanged = 
       meaning !== (existingWordData?.meaning || "") ||
       exampleSentence !== (existingWordData?.exampleSentence || "") ||
       exampleSentenceTranslation !== (existingWordData?.exampleSentenceTranslation || "") ||
       confidence !== (existingWordData?.confidence || 1) ||
-      isLearned !== (existingWordData?.learned || false)
-    ) {
-      setIsChanged(true)
+      isLearned !== originalLearned;
+
+    console.log('Change detection:', {
+      current: { 
+        meaning, 
+        exampleSentence, 
+        exampleSentenceTranslation, 
+        confidence, 
+        isLearned 
+      },
+      original: { 
+        meaning: existingWordData?.meaning || "", 
+        exampleSentence: existingWordData?.exampleSentence || "", 
+        exampleSentenceTranslation: existingWordData?.exampleSentenceTranslation || "", 
+        confidence: existingWordData?.confidence || 1, 
+        learned: originalLearned
+      },
+      changed: formChanged,
+      learnedChanged: isLearned !== originalLearned
+    });
+    
+    if (formChanged) {
+      console.log('Form fields changed, setting isChanged to true');
+      setIsChanged(true);
+    } else {
+      console.log('Form fields match existingWordData, no changes detected');
+      setIsChanged(false);
     }
-  }, [meaning, exampleSentence, exampleSentenceTranslation, confidence, isLearned, existingWordData])
+  }, [meaning, exampleSentence, exampleSentenceTranslation, confidence, isLearned, existingWordData]);
+
+  // Watch for triggerSave from parent component
+  useEffect(() => {
+    if (triggerSave && isChanged) {
+      // Only save if there are changes
+      saveChanges();
+    }
+  }, [triggerSave, isChanged, saveChanges]);
 
   const saveAndClose = () => {
     if (!existingWordData && !hasValidMeaning) {
@@ -318,91 +646,6 @@ function WordSidebar({
     }
     saveChanges()
     handleClose()
-  }
-
-  const saveChanges = () => {
-    // Special case: If user is marking a word as mastered (learned),
-    // we don't require a meaning to be provided
-    const isMarkedAsLearned = isLearned && tempLearned !== false;
-    
-    // Check if meaning is required but not provided
-    if (!isMarkedAsLearned && !meaning.trim()) {
-      setShowMeaningWarning(true);
-      setMeaningInputHighlight?.('red');
-      return;
-    }
-
-    if (existingWordData) {
-      // Make sure ID is not null before using it
-      if (existingWordData.id !== null) {
-        // Update existing word with all fields
-        const updatedData = {
-          meaning,
-          exampleSentence,
-          exampleSentenceTranslation,
-          confidence,
-        };
-        
-        // Log the update operation to debug
-        console.log('Updating word with ID', existingWordData.id, updatedData);
-        
-        updateWord(existingWordData.id, updatedData);
-  
-        // If the learned status changed, handle that separately
-        if (isLearned !== existingWordData.learned) {
-          if (isLearned) {
-            markAsLearned(existingWordData.id)
-          } else {
-            unmarkAsLearned(existingWordData.id)
-          }
-        }
-      } else {
-        // If ID is null, treat it as a new word with the same word text
-        console.log('Adding new word', word);
-        
-        // Only add word if it has a meaning or is marked as learned
-        if (meaning.trim() || isLearned) {
-          addWord({
-            word,
-            meaning,
-            exampleSentence,
-            exampleSentenceTranslation,
-            confidence,
-            learned: isLearned,
-            language: "French",
-          });
-        } else {
-          setShowMeaningWarning(true);
-          setMeaningInputHighlight?.('red');
-          return;
-        }
-      }
-    } else {
-      // Only add new word if meaning is provided or word is marked as learned
-      if (meaning.trim() || isLearned) {
-        console.log('Adding brand new word', word);
-        addWord({
-          word,
-          meaning,
-          exampleSentence,
-          exampleSentenceTranslation,
-          confidence,
-          learned: isLearned,
-          language: "French",
-        });
-      } else {
-        setShowMeaningWarning(true);
-        setMeaningInputHighlight?.('red');
-        return;
-      }
-    }
-
-    // Clear temporary states
-    setMeaningInputHighlight?.('none');
-    setTempConfidence(null)
-    setTempLearned(null)
-    onUpdate()
-    setIsChanged(false)
   }
 
   const handleCloseClick = () => {
@@ -414,15 +657,157 @@ function WordSidebar({
   }
 
   const handleMarkAsLearned = () => {
-    setIsLearned(true)
-    setTempLearned(true)
-    setIsChanged(true)
+    console.log('Marking word as learned:', { 
+      before: isLearned, 
+      word, 
+      existingWordData: existingWordData 
+    });
+    
+    setIsLearned(true);
+    setTempLearned(true);
+    
+    // Force isChanged to update immediately
+    setIsChanged(true);
+    
+    // If the word already has a real ID (greater than 0) and is not marked as learned,
+    // we can immediately update it in the word bank
+    if (existingWordData?.id && existingWordData.id > 0 && !existingWordData.learned) {
+      console.log('Marking existing word as learned in word bank with ID:', existingWordData.id);
+      markAsLearned(existingWordData.id);
+      
+      // Update the existingWordData to reflect the change
+      const updatedWordData = {
+        ...existingWordData,
+        learned: true
+      };
+      
+      // Update parent state to reflect the change
+      setSelectedWordData(updatedWordData);
+      
+      // Force a UI refresh
+      onUpdate();
+    }
+    // If the word has a temporary ID (-1), we need to find its real ID in the word bank
+    else if (existingWordData?.id === -1) {
+      console.log('Word has temporary ID, searching for real ID in word bank for:', word);
+      
+      // Look for the word in both word banks
+      setTimeout(() => {
+        const wordInLearning = learningWords.find((w: { word: string }) => 
+          w.word && w.word.toLowerCase() === word.toLowerCase()
+        );
+        const wordInLearned = learnedWords.find((w: { word: string }) => 
+          w.word && w.word.toLowerCase() === word.toLowerCase()
+        );
+        const wordInBank = wordInLearning || wordInLearned;
+        
+        if (wordInBank) {
+          console.log('Found word in word bank with real ID:', wordInBank.id);
+          
+          // Mark the word as learned in the word bank
+          markAsLearned(wordInBank.id);
+          
+          // Create an updated word data object with the real ID
+          const updatedWordData = {
+            ...existingWordData,
+            id: wordInBank.id,  // Replace temporary ID with real ID
+            learned: true
+          };
+          
+          // Update parent state
+          setSelectedWordData(updatedWordData);
+          
+          // Force UI refresh
+          onUpdate();
+        } else {
+          console.log('Could not find newly added word in word bank, trying direct save...');
+          
+          // If we can't find the word, try to save changes directly
+          saveChanges();
+        }
+      }, 100);
+    }
+    // If the word doesn't have an ID (completely new), we'll handle it when saved
+    else {
+      console.log('New word or no ID available, changes will be applied on save');
+    }
   }
 
   const handleUnmarkAsLearned = () => {
-    setIsLearned(false)
-    setTempLearned(false)
-    setIsChanged(true)
+    console.log('Unmarking word as learned:', { 
+      before: isLearned, 
+      word,
+      existingWordData: existingWordData 
+    });
+    
+    setIsLearned(false);
+    setTempLearned(false);
+    
+    // Force isChanged to update immediately
+    setIsChanged(true);
+    
+    // If the word already has a real ID (greater than 0) and is marked as learned,
+    // we can immediately update it in the word bank
+    if (existingWordData?.id && existingWordData.id > 0 && existingWordData.learned) {
+      console.log('Unmarking existing word as learned in word bank with ID:', existingWordData.id);
+      unmarkAsLearned(existingWordData.id);
+      
+      // Update the existingWordData to reflect the change
+      const updatedWordData = {
+        ...existingWordData,
+        learned: false
+      };
+      
+      // Update parent state to reflect the change
+      setSelectedWordData(updatedWordData);
+      
+      // Force a UI refresh
+      onUpdate();
+    }
+    // If the word has a temporary ID (-1), we need to find its real ID in the word bank
+    else if (existingWordData?.id === -1) {
+      console.log('Word has temporary ID, searching for real ID in word bank for:', word);
+      
+      // Look for the word in both word banks
+      setTimeout(() => {
+        const wordInLearning = learningWords.find((w: { word: string }) => 
+          w.word && w.word.toLowerCase() === word.toLowerCase()
+        );
+        const wordInLearned = learnedWords.find((w: { word: string }) => 
+          w.word && w.word.toLowerCase() === word.toLowerCase()
+        );
+        const wordInBank = wordInLearning || wordInLearned;
+        
+        if (wordInBank) {
+          console.log('Found word in word bank with real ID:', wordInBank.id);
+          
+          // Unmark the word as learned in the word bank
+          unmarkAsLearned(wordInBank.id);
+          
+          // Create an updated word data object with the real ID
+          const updatedWordData = {
+            ...existingWordData,
+            id: wordInBank.id,  // Replace temporary ID with real ID
+            learned: false
+          };
+          
+          // Update parent state
+          setSelectedWordData(updatedWordData);
+          
+          // Force UI refresh
+          onUpdate();
+        } else {
+          console.log('Could not find newly added word in word bank, trying direct save...');
+          
+          // If we can't find the word, try to save changes directly
+          saveChanges();
+        }
+      }, 100);
+    }
+    // If the word doesn't have an ID (completely new), we'll handle it when saved
+    else {
+      console.log('New word or no ID available, changes will be applied on save');
+    }
   }
 
   const handleConfidenceChange = (level: number) => {
@@ -442,10 +827,22 @@ function WordSidebar({
     alert(`AI would generate content for the ${field} field here.`)
   }
 
-  const handleSidebarUpdate = () => {
-    // Just call the parent component's update function
+  // In the WordSidebar component, update handleSidebarUpdate function
+  const handleSidebarUpdate = useCallback(() => {
+    // Perform a more robust refresh to ensure UI updates
+    console.log('Performing sidebar update');
+    
+    // Call parent's update function
     onUpdate();
-  }
+    
+    // Force a re-render of the sidebar
+    setIsChanged(false);
+    
+    // If we have an ID now, update the UI to reflect we're editing an existing word
+    if (existingWordData?.id) {
+      console.log('Sidebar now editing existing word with ID:', existingWordData.id, 'and data:', existingWordData);
+    }
+  }, [onUpdate, existingWordData]);
 
   // Add handleDelete function
   const handleDelete = () => {
@@ -460,10 +857,18 @@ function WordSidebar({
 
   return (
     <>
-      <div className="fixed top-0 right-0 h-full w-80 bg-white shadow-lg z-50 overflow-y-auto" ref={sidebarRef}>
+      <div 
+        className="fixed top-0 right-0 h-full w-80 bg-white shadow-lg z-50 overflow-y-auto" 
+        ref={sidebarRef}
+        data-changes={isChanged && hasValidMeaning ? "true" : "false"}
+        data-word-id={existingWordData?.id || "new"}
+        data-word-data={`meaning:${meaning.substring(0, 20)}`}
+      >
         <div className="p-4">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold">{existingWordData ? "Edit Word" : "Add New Word"}</h3>
+            <h3 className="text-lg font-bold">
+              {existingWordData && existingWordData.id !== null ? "Edit Word" : "Add New Word"}
+            </h3>
             <Button variant="ghost" size="icon" onClick={handleCloseClick}>
               <X className="h-4 w-4" />
             </Button>
@@ -583,8 +988,11 @@ function WordSidebar({
 
             <div className="flex gap-2 pt-4">
               {isLearned ? (
-                <Button onClick={handleUnmarkAsLearned} variant="outline" className="flex-1">
-                  Unmark as Mastered
+                <Button onClick={handleUnmarkAsLearned} variant="outline" className="flex-1 border-primary text-primary">
+                  <span className="flex items-center gap-2">
+                    <span className="inline-block h-2 w-2 rounded-full bg-primary"></span>
+                    Unmark as Mastered
+                  </span>
                 </Button>
               ) : (
                 <Button onClick={handleMarkAsLearned} variant="outline" className="flex-1">
@@ -594,10 +1002,17 @@ function WordSidebar({
             </div>
 
             <div className="flex gap-2 pt-2">
-              <Button onClick={saveChanges} variant="default" className="flex-1" disabled={!isChanged}>
-                Save Changes
+              <Button 
+                onClick={saveChanges} 
+                variant="default" 
+                className={`flex-1 ${isLearned ? 'bg-primary' : ''}`}
+                disabled={!isChanged}
+                data-is-changed={isChanged}
+                data-is-learned={isLearned}
+              >
+                {isLearned ? 'Save as Mastered' : 'Save Changes'}
               </Button>
-              <Button onClick={handleClose} variant="outline" className="flex-1">
+              <Button onClick={handleCloseClick} variant="outline" className="flex-1">
                 Close
               </Button>
             </div>
@@ -625,7 +1040,7 @@ function WordSidebar({
             <DialogDescription>You have unsaved changes. Do you want to save them before closing?</DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2 sm:justify-end">
-            <Button variant="outline" onClick={handleClose}>
+            <Button variant="outline" onClick={handleCloseClick}>
               Discard Changes
             </Button>
             <Button onClick={saveAndClose}>Save Changes</Button>
@@ -911,6 +1326,14 @@ export default function ReadingMode({
   const [tempLearned, setTempLearned] = useState<boolean | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [meaningInputHighlight, setMeaningInputHighlight] = useState<'none' | 'blue' | 'red'>('none')
+  
+  // Add state for word change confirmation
+  const [showWordChangeConfirmation, setShowWordChangeConfirmation] = useState(false)
+  const [tempSelectedWord, setTempSelectedWord] = useState<string | null>(null)
+  
+  // Add state to trigger a save from outside the sidebar
+  const [triggerSave, setTriggerSave] = useState(false)
+  
   const contentRef = useRef<HTMLDivElement>(null)
 
   // Add a refresh trigger - MOVED UP before it's used in useEffect
@@ -1151,7 +1574,7 @@ export default function ReadingMode({
     return () => {
       document.removeEventListener("mouseup", handleMouseUp)
     }
-  }, [selectedWordSpans, learningWords, learnedWords, sidebarJustClosed, selectedWord])
+  }, [selectedWordSpans, learningWords, learnedWords, sidebarJustClosed, selectedWord, setSelectedWordData, setSelectedWord, setSidebarOpen])
 
   // Add keyboard shortcut handler for the currently hovered word
   useEffect(() => {
@@ -1239,35 +1662,80 @@ export default function ReadingMode({
     };
   }, [hoveredWord, isEditingMultiSelect, selectedWord, learningWords, learnedWords, updateConfidence, markAsLearned, forceRefresh, selectedStory]);
 
-  // Now modify the renderStoryContent function to use these new handlers:
-  // Find this part in the renderStoryContent function:
+  // Define handleWordClick and other functions before they're used
+  const handleWordClick = useCallback((e: React.MouseEvent, word: string) => {
+    // Prevent default to stop any other click handlers
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (isEditingMultiSelect) return;
+    
+    // Don't do anything if we're already showing the word change confirmation
+    if (showWordChangeConfirmation) return;
 
-  // return (
-  //   <span
-  //     key={index}
-  //     className={className}
-  //     onClick={() => handleWordClick(cleanToken)}
-  //     onMouseEnter={() => handleWordHover(cleanToken)}
-  //     onMouseLeave={handleWordHoverLeave}
-  //   >
-  //     {token}
-  //   </span>
-  // )
+    const clickedWord = word.toLowerCase();
+    
+    // Don't do anything if clicking the same word
+    if (selectedWord === clickedWord && sidebarOpen) return;
+    
+    // If sidebar is open and there are unsaved changes, show warning
+    if (sidebarOpen && selectedWord) {
+      // Check if there are unsaved changes in the current word's sidebar
+      const sidebarElement = document.querySelector('.fixed.top-0.right-0.h-full.w-80');
+      const wordSidebarHasChanges = sidebarElement?.getAttribute('data-changes') === 'true';
+      
+      if (wordSidebarHasChanges) {
+        // Store the word user is trying to click on
+        setTempSelectedWord(clickedWord);
+        // Show the confirmation dialog
+        setShowWordChangeConfirmation(true);
+        return;
+      }
+    }
+    
+    // If we're here, it means there are no unsaved changes or no sidebar is open
+    // Search for the word in both learning and learned word lists
+    const foundLearningWord = learningWords.find(w => w.word?.toLowerCase() === clickedWord);
+    const foundLearnedWord = learnedWords.find(w => w.word?.toLowerCase() === clickedWord);
+    const foundWord = foundLearningWord || foundLearnedWord;
+    
+    if (foundWord) {
+      // If word exists in the wordbank, use its data
+      setSelectedWordData({
+        id: foundWord.id,
+        word: foundWord.word,
+        meaning: foundWord.meaning || "",
+        confidence: foundWord.confidence,
+        learned: foundWord.learned || false,
+        exampleSentence: foundWord.exampleSentence || "",
+        exampleSentenceTranslation: foundWord.exampleSentenceTranslation || "",
+      });
+    } else {
+      // If word is not in wordbank, set a new word with default values
+      setSelectedWordData({
+        id: null,
+        word: clickedWord,
+        meaning: "",
+        confidence: 1,
+        learned: false,
+        exampleSentence: "",
+        exampleSentenceTranslation: "",
+      });
+    }
+    
+    setSelectedWord(clickedWord);
+    setSidebarOpen(true);
+  }, [isEditingMultiSelect, showWordChangeConfirmation, selectedWord, sidebarOpen, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord, setShowWordChangeConfirmation]);
 
-  // And replace it with:
+  function handleWordHover(word: string) {
+    setHoveredWord(word)
+  }
 
-  // Also replace the TooltipTrigger span with this updated version:
+  function handleWordHoverLeave() {
+    setHoveredWord(null)
+  }
 
-  // Now replace the selectedText button with a button for selectedWordSpans:
-  // Find this code:
-
-  // And replace with:
-
-  // Update the dependencies in the renderStoryContent useCallback:
-  // Find this line:
-  // [getWordStatus, refreshTrigger, hoveredWord, getConfidenceColor, selectedWord, tempConfidence, tempLearned],
-
-  // And replace with:
+  // Now, define checkForPhrase and renderStoryContent
   const checkForPhrase = useCallback(
     (token: string, index: number, tokens: string[]) => {
       // Clean the current token
@@ -1527,6 +1995,8 @@ export default function ReadingMode({
       handleWordClick,
       handleWordHover,
       handleWordHoverLeave,
+      handleWordSpanMouseDown,
+      handleWordSpanMouseEnter
     ],
   )
 
@@ -1562,6 +2032,136 @@ export default function ReadingMode({
       setSelectedStory(story)
     }
   }, [selectedStoryId, availableStories])
+
+  // Add these handlers for the word change confirmation
+  const handleDiscardAndSwitchWord = useCallback(() => {
+    // First close the confirmation dialog
+    setShowWordChangeConfirmation(false);
+    
+    if (tempSelectedWord) {
+      // Immediately close any current sidebar
+      setSelectedWord(null);
+      setSidebarOpen(false);
+      
+      // Small delay to ensure the sidebar is closed before opening the new one
+      setTimeout(() => {
+        // Follow the same process as in handleWordClick but for tempSelectedWord
+        const clickedWord = tempSelectedWord;
+        
+        // Search for the word in both learning and learned word lists
+        const foundLearningWord = learningWords.find(w => w.word?.toLowerCase() === clickedWord)
+        const foundLearnedWord = learnedWords.find(w => w.word?.toLowerCase() === clickedWord)
+        const foundWord = foundLearningWord || foundLearnedWord
+        
+        if (foundWord) {
+          // If word exists in the wordbank, use its data
+          setSelectedWordData({
+            id: foundWord.id,
+            word: foundWord.word,
+            meaning: foundWord.meaning || "",
+            confidence: foundWord.confidence,
+            learned: foundWord.learned || false,
+            exampleSentence: foundWord.exampleSentence || "",
+            exampleSentenceTranslation: foundWord.exampleSentenceTranslation || "",
+          })
+        } else {
+          // If word is not in wordbank, set a new word with default values
+          setSelectedWordData({
+            id: null,
+            word: clickedWord,
+            meaning: "",
+            confidence: 1,
+            learned: false,
+            exampleSentence: "",
+            exampleSentenceTranslation: "",
+          })
+        }
+        
+        // Then open the sidebar for the new word
+        setSelectedWord(clickedWord);
+        setSidebarOpen(true);
+        
+        // Clear the temp selected word
+        setTempSelectedWord(null);
+      }, 100);
+    }
+  }, [tempSelectedWord, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord]);
+
+  const handleSaveAndSwitchWord = useCallback(() => {
+    // First close the confirmation dialog
+    setShowWordChangeConfirmation(false);
+    
+    // Trigger the save in the sidebar by setting the triggerSave flag
+    setTriggerSave(true);
+    
+    // Wait a short moment to allow the save to complete, then switch words
+    setTimeout(() => {
+      // Reset the trigger
+      setTriggerSave(false);
+      
+      // Close the current sidebar
+      setSelectedWord(null);
+      setSidebarOpen(false);
+      
+      // Short delay before opening the new sidebar
+      setTimeout(() => {
+        if (tempSelectedWord) {
+          // Process the new word
+          const clickedWord = tempSelectedWord;
+          
+          // Search for the word in both learning and learned word lists
+          const foundLearningWord = learningWords.find(w => w.word?.toLowerCase() === clickedWord)
+          const foundLearnedWord = learnedWords.find(w => w.word?.toLowerCase() === clickedWord)
+          const foundWord = foundLearningWord || foundLearnedWord
+          
+          if (foundWord) {
+            // If word exists in the wordbank, use its data
+            setSelectedWordData({
+              id: foundWord.id,
+              word: foundWord.word,
+              meaning: foundWord.meaning || "",
+              confidence: foundWord.confidence,
+              learned: foundWord.learned || false,
+              exampleSentence: foundWord.exampleSentence || "",
+              exampleSentenceTranslation: foundWord.exampleSentenceTranslation || "",
+            })
+          } else {
+            // If word is not in wordbank, set a new word with default values
+            setSelectedWordData({
+              id: null,
+              word: clickedWord,
+              meaning: "",
+              confidence: 1,
+              learned: false,
+              exampleSentence: "",
+              exampleSentenceTranslation: "",
+            })
+          }
+          
+          // Open the new word's sidebar
+          setSelectedWord(clickedWord);
+          setSidebarOpen(true);
+          
+          // Clear the temp selected word
+          setTempSelectedWord(null);
+        }
+      }, 100);
+    }, 300); // A longer wait to ensure the save completes
+  }, [tempSelectedWord, learningWords, learnedWords, setSelectedWordData, setSelectedWord, setSidebarOpen, setTempSelectedWord, setTriggerSave]);
+
+  // Add effect to toggle class on body when word change confirmation is shown
+  useEffect(() => {
+    if (showWordChangeConfirmation) {
+      document.body.classList.add('word-change-confirmation-open');
+    } else {
+      document.body.classList.remove('word-change-confirmation-open');
+    }
+    
+    return () => {
+      // Clean up on unmount
+      document.body.classList.remove('word-change-confirmation-open');
+    };
+  }, [showWordChangeConfirmation]);
 
   if (selectedStory) {
     return (
@@ -1639,6 +2239,7 @@ export default function ReadingMode({
 
         {selectedWord && (
           <WordSidebar
+            key={`word-sidebar-${selectedWordData?.id || 'new'}-${selectedWordData?.meaning || 'empty'}-${refreshTrigger}`}
             word={selectedWord}
             onClose={() => {
               setSelectedWord(null)
@@ -1656,6 +2257,7 @@ export default function ReadingMode({
             meaningInputHighlight={meaningInputHighlight}
             setMeaningInputHighlight={setMeaningInputHighlight}
             setSelectedWordData={setSelectedWordData}
+            triggerSave={triggerSave}
           />
         )}
 
@@ -1668,6 +2270,39 @@ export default function ReadingMode({
             onSave={handleEditStory}
           />
         )}
+
+        {/* Add Word Change Confirmation Dialog */}
+        <Dialog 
+          open={showWordChangeConfirmation} 
+          onOpenChange={(open) => {
+            // Only allow the buttons to close the dialog, not clicking outside
+            if (open === false) {
+              return false; // Prevent auto-closing
+            }
+            setShowWordChangeConfirmation(open);
+          }}
+        >
+          <DialogContent 
+            className="sm:max-w-[425px]"
+            // Prevent closing on outside click or escape key
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onEscapeKeyDown={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+          >
+            <DialogHeader>
+              <DialogTitle>Unsaved Changes</DialogTitle>
+              <DialogDescription>
+                You have unsaved changes for "{selectedWord}". Do you want to save these changes before viewing "{tempSelectedWord}"?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex gap-2 sm:justify-end">
+              <Button variant="outline" onClick={handleDiscardAndSwitchWord}>
+                Discard Changes
+              </Button>
+              <Button onClick={handleSaveAndSwitchWord}>Save Changes</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
@@ -1742,52 +2377,6 @@ export default function ReadingMode({
     )
     setAvailableStories(updatedStories)
     setSelectedStory(updatedStory)
-  }
-
-  function handleWordClick(e: React.MouseEvent, word: string) {
-    if (isEditingMultiSelect) return
-
-    const clickedWord = word.toLowerCase()
-    
-    // Search for the word in both learning and learned word lists
-    const foundLearningWord = learningWords.find(w => w.word.toLowerCase() === clickedWord)
-    const foundLearnedWord = learnedWords.find(w => w.word.toLowerCase() === clickedWord)
-    const foundWord = foundLearningWord || foundLearnedWord
-    
-    if (foundWord) {
-      // If word exists in the wordbank, use its data
-      setSelectedWordData({
-        id: foundWord.id,
-        word: foundWord.word,
-        meaning: foundWord.meaning,
-        confidence: foundWord.confidence,
-        learned: foundWord.learned || false,
-        exampleSentence: foundWord.exampleSentence || "",
-        exampleSentenceTranslation: foundWord.exampleSentenceTranslation || "",
-      })
-    } else {
-      // If word is not in wordbank, set a new word with default values
-      setSelectedWordData({
-        id: null,
-        word: clickedWord,
-        meaning: "",
-        confidence: 1,
-        learned: false,
-        exampleSentence: "",
-        exampleSentenceTranslation: "",
-      })
-    }
-    
-    setSelectedWord(clickedWord)
-    setSidebarOpen(true)
-  }
-
-  function handleWordHover(word: string) {
-    setHoveredWord(word)
-  }
-
-  function handleWordHoverLeave() {
-    setHoveredWord(null)
   }
 
   function getConfidenceColor(confidence: number) {
