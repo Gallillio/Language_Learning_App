@@ -5,7 +5,7 @@ import type React from "react"
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { PlusCircle, Book, ArrowLeft, X, Sparkles, Upload, Edit, Trash2 } from "lucide-react"
+import { PlusCircle, Book, ArrowLeft, X, Sparkles, Upload, Edit, Trash2, Search } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { useWordBank } from "@/contexts/word-bank-context"
 import { useStories } from "@/contexts/story-context"
@@ -31,6 +31,7 @@ interface Story {
   lastRead: string
   progress: number
   content: string
+  tags?: string
   wordStats?: {
     notLearned: number
     confidence1: number
@@ -650,7 +651,7 @@ function WordSidebar({
     
     if (formChanged) {
       setIsChanged(true);
-    } else {
+        } else {
       setIsChanged(false);
     }
   }, [meaning, exampleSentence, exampleSentenceTranslation, notes, imageUrl, confidence, isLearned, existingWordData]);
@@ -1331,16 +1332,18 @@ function AddStoryDialog({ isOpen, onClose, onAddStory }: AddStoryDialogProps) {
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [content, setContent] = useState("")
+  const [tags, setTags] = useState("")
   const [isImporting, setIsImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleSubmit = () => {
     if (title.trim() && description.trim() && content.trim()) {
-      onAddStory({ title, description, content })
+      onAddStory({ title, description, content, tags })
       onClose()
       setTitle("")
       setDescription("")
       setContent("")
+      setTags("")
     }
   }
 
@@ -1391,6 +1394,18 @@ function AddStoryDialog({ isOpen, onClose, onAddStory }: AddStoryDialogProps) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="col-span-3"
+            />
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="tags" className="text-right">
+              Tags
+            </Label>
+            <Input
+              id="tags"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              className="col-span-3"
+              placeholder="Comma-separated tags (optional)"
             />
           </div>
           <div className="grid grid-cols-4 items-start gap-4">
@@ -1449,9 +1464,23 @@ export default function ReadingMode({
   const { stories, userLibrary, loading: storiesLoading, fetchStories, fetchUserLibrary, addToLibrary } = useStories()
   const { learningWords, learnedWords, addWord, updateWord, updateConfidence, markAsLearned, unmarkAsLearned, getWordStatus, deleteWord } = useWordBank()
   const { toast } = useToast()
+  const { updateLastRead } = useStories()
+
+  // Add search state
+  const [searchQuery, setSearchQuery] = useState("")
 
   // First, declare the stories state
   const [availableStories, setAvailableStories] = useState<Story[]>([])
+
+  // Filter stories based on search query
+  const filteredStories = availableStories.filter((story) => {
+    const searchLower = searchQuery.toLowerCase()
+    return (
+      story.title.toLowerCase().includes(searchLower) ||
+      story.description.toLowerCase().includes(searchLower) ||
+      (story.tags && story.tags.toLowerCase().includes(searchLower))
+    )
+  })
 
   // Then use it in the derived state
   const [selectedStoryId, setSelectedStoryId] = useState<number | null>(state.selectedStory)
@@ -1492,6 +1521,7 @@ export default function ReadingMode({
     wordCount: 120,
     lastRead: "Today",
     progress: 50,
+    tags: "test, beginner, vocabulary",
     content:
       "Bonjour et bienvenue dans cette histoire de test. Je vais au marché pour acheter du pain et du fromage. Le soleil brille aujourd'hui et c'est une belle journée. J'aime beaucoup me promener dans le parc quand il fait beau. Les oiseaux chantent dans les arbres. Enchanté de faire votre connaissance. Merci beaucoup pour votre aide. Au revoir, à demain! S'il vous plaît, pouvez-vous m'aider? Oui, je comprends. Non, je ne suis pas d'accord. Je voudrais apprendre le français. C'est très intéressant et amusant.",
   }
@@ -1504,6 +1534,7 @@ export default function ReadingMode({
       wordCount: 1250,
       lastRead: "2 days ago",
       progress: 65,
+      tags: "classic, literature, intermediate",
       content:
         "Lorsque j'avais six ans j'ai vu, une fois, une magnifique image, dans un livre sur la Forêt Vierge qui s'appelait 'Histoires Vécues'. Ça représentait un serpent boa qui avalait un fauve. Voilà la copie du dessin. On disait dans le livre: 'Les serpents boas avalent leur proie tout entière, sans la mâcher. Ensuite ils ne peuvent plus bouger et ils dorment pendant les six mois de leur digestion.' J'ai alors beaucoup réfléchi sur les aventures de la jungle et, à mon tour, j'ai réussi, avec un crayon de couleur, à tracer mon premier dessin. Mon dessin numéro 1. Il était comme ça.",
     },
@@ -1514,6 +1545,7 @@ export default function ReadingMode({
       wordCount: 850,
       lastRead: "1 week ago",
       progress: 100,
+      tags: "fable, beginner, moral",
       content:
         "Il était une fois un lièvre qui, se vantant de courir plus vite que quiconque, ne cessait de taquiner la tortue pour sa lenteur. Puis un jour, la tortue irritée répondit: 'Pour qui te prends-tu? Il est indéniable que tu es rapide, mais même toi tu peux être battu!' Le lièvre poussa un cri de rire. 'Battu dans une course? Par qui? Pas par toi, sûrement! Je parie qu'il n'y a personne au monde qui puisse gagner contre moi, je suis si rapide. Maintenant, pourquoi n'essaies-tu pas?'",
     },
@@ -1524,6 +1556,7 @@ export default function ReadingMode({
       wordCount: 1050,
       lastRead: "3 days ago",
       progress: 30,
+      tags: "children, fable, beginner",
       content:
         "Il était une fois trois petits cochons. Un jour, leur mère leur dit: 'Vous êtes tous grands maintenant. Vous pouvez construire vos propres maisons, mais faites attention que le loup ne vous attrape pas.' Le premier petit cochon construisit une maison de paille. Le deuxième petit cochon construisit une maison de bois. Le troisième petit cochon construisit une maison de briques. Une nuit, le grand méchant loup vint à la première maison. 'Petit cochon, petit cochon, laisse-moi entrer', appela-t-il. 'Non, non, pas par les poils de mon menton', répondit le petit cochon. 'Alors je vais souffler et je vais démolir ta maison', dit le loup.",
     },
@@ -1534,6 +1567,7 @@ export default function ReadingMode({
       wordCount: 750,
       lastRead: "Never",
       progress: 0,
+      tags: "fable, moral, beginner",
       content:
         "La Cigale, ayant chanté tout l'été, se trouva fort dépourvue quand la bise fut venue: Pas un seul petit morceau de mouche ou de vermisseau. Elle alla crier famine chez la Fourmi sa voisine, la priant de lui prêter quelque grain pour subsister jusqu'à la saison nouvelle. 'Je vous paierai, lui dit-elle, avant l'août, foi d'animal, intérêt et principal.' La Fourmi n'est pas prêteuse: c'est là son moindre défaut. 'Que faisiez-vous au temps chaud?' dit-elle à cette emprunteuse. 'Nuit et jour à tout venant je chantais, ne vous déplaise.' 'Vous chantiez? j'en suis fort aise. Eh bien! dansez maintenant.'",
     },
@@ -2413,6 +2447,29 @@ export default function ReadingMode({
     // (We don't need to do anything else since we're just canceling the operation)
   }, [setShowWordChangeConfirmation, setTempSelectedWord]);
 
+  useEffect(() => {
+    if (selectedStory) {
+      // Update last read date when story is opened
+      updateLastRead(selectedStory.id)
+    }
+  }, [selectedStory])
+
+  const formatLastRead = (date: string | null) => {
+    if (!date) return "Not Opened Yet"
+    const lastRead = new Date(date)
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+
+    if (lastRead.toDateString() === today.toDateString()) {
+      return "Today"
+    } else if (lastRead.toDateString() === yesterday.toDateString()) {
+      return "Yesterday"
+    } else {
+      return lastRead.toLocaleDateString()
+    }
+  }
+
   if (selectedStory) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -2427,7 +2484,7 @@ export default function ReadingMode({
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>{selectedStory.wordCount} words</span>
               <span>•</span>
-              <span>Last read: {selectedStory.lastRead}</span>
+              <span>Last read: {formatLastRead(selectedStory.lastRead)}</span>
             </div>
             <Button
               variant="outline"
@@ -2567,9 +2624,22 @@ export default function ReadingMode({
         </Button>
       </div>
 
+      {/* Add Search Bar */}
+      <div className="mb-6">
+        <div className="relative">
+          <Input
+            type="text"
+            placeholder="Search stories by title, description, or tags..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {availableStories.map((story) => (
-          // Update the story card onClick
+        {filteredStories.map((story) => (
           <Card
             key={story.id}
             className="cursor-pointer hover:shadow-lg transition-shadow"
@@ -2593,8 +2663,20 @@ export default function ReadingMode({
                 <Progress value={story.progress} className="h-2" />
               )}
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex flex-col items-start gap-2">
               <p className="text-xs text-muted-foreground">Last read: {story.lastRead}</p>
+              {story.tags && (
+                <div className="flex flex-wrap gap-1">
+                  {story.tags.split(',').map((tag, index) => (
+                    <span
+                      key={index}
+                      className="px-2 py-1 text-xs bg-primary/10 text-primary rounded-full"
+                    >
+                      {tag.trim()}
+                    </span>
+                  ))}
+                </div>
+              )}
             </CardFooter>
           </Card>
         ))}
@@ -2614,11 +2696,35 @@ export default function ReadingMode({
       content: newStoryData.content,
       language: "French", // Use a proper language selection in the UI
       difficulty: "intermediate", // Use a proper difficulty selection in the UI
-      tags: "" // Add tags support if needed
+      tags: newStoryData.tags || "" // Add tags support
     }
     
-    // Use an appropriate API call here
-    // For now, we'll just close the dialog
+    // Create a new story object with the API data
+    const newStory: Story = {
+      id: availableStories.length + 1, // Temporary ID until backend implementation
+      title: newStoryData.title,
+      description: newStoryData.description,
+      content: newStoryData.content,
+      wordCount: newStoryData.content.split(/\s+/).length,
+      lastRead: "Never",
+      progress: 0,
+      tags: newStoryData.tags,
+      wordStats: {
+        notLearned: 0,
+        confidence1: 0,
+        confidence2: 0,
+        confidence3: 0,
+        confidence4: 0,
+        confidence5: 0,
+        mastered: 0,
+        total: 0
+      }
+    }
+    
+    // Add the new story to the available stories
+    setAvailableStories(prev => [...prev, newStory])
+    
+    // Close the dialog
     setIsAddStoryDialogOpen(false)
   }
 

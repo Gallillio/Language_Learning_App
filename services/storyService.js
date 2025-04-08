@@ -61,4 +61,13 @@ export const deleteStory = async (id) => {
     } catch (error) {
         return { success: false, error: error.response?.data || 'Failed to delete story' };
     }
+};
+
+export const updateLastRead = async (storyId) => {
+    try {
+        const response = await api.post(`/stories/${storyId}/update_last_read/`);
+        return { success: true, data: response.data };
+    } catch (error) {
+        return { success: false, error: error.response?.data || 'Failed to update last read date' };
+    }
 }; 

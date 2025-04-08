@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react"
-import { getStories, getUserLibrary, addStoryToLibrary } from "../services/storyService"
+import { getStories, getUserLibrary, addStoryToLibrary, updateLastRead as updateLastReadDate } from "../services/storyService"
 
 export interface Story {
   id: number
@@ -26,6 +26,7 @@ interface StoryContextType {
   fetchStories: (filter?: Record<string, any>) => Promise<void>
   fetchUserLibrary: () => Promise<void>
   addToLibrary: (storyId: number) => Promise<{ success: boolean; message?: string }>
+  updateLastRead: (storyId: number) => Promise<{ success: boolean; message?: string }>
 }
 
 const StoryContext = createContext<StoryContextType | undefined>(undefined)
@@ -90,6 +91,22 @@ export function StoryProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Update last read date for a story
+  const updateLastRead = async (storyId: number) => {
+    try {
+      const result = await updateLastReadDate(storyId)
+      if (result.success) {
+        // Refresh the library to get updated last read dates
+        await fetchUserLibrary()
+        return { success: true }
+      }
+      return { success: false, message: result.error || 'Failed to update last read date' }
+    } catch (error) {
+      console.error('Error updating last read date:', error)
+      return { success: false, message: 'An error occurred' }
+    }
+  }
+
   return (
     <StoryContext.Provider
       value={{
@@ -99,6 +116,7 @@ export function StoryProvider({ children }: { children: ReactNode }) {
         fetchStories,
         fetchUserLibrary,
         addToLibrary,
+        updateLastRead,
       }}
     >
       {children}
